@@ -9,13 +9,17 @@ import {
   onApprovalUpdate,
   offApprovalUpdate,
   onContractStatus,
-  offContractStatus
+  offContractStatus,
+  onRiskScoreUpdate,
+  offRiskScoreUpdate
 } from '../services/socket';
-import { Contract, ClauseDiff, Comment, ApprovalNode, RiskLevel } from '../types';
+import { Contract, ClauseDiff, Comment, ApprovalNode, RiskLevel, ContractSummary, RiskScoreDetail } from '../types';
 import DiffViewer from '../components/DiffViewer';
 import CommentPanel from '../components/CommentPanel';
 import ApprovalFlow from '../components/ApprovalFlow';
 import VersionChain from '../components/VersionChain';
+import ContractSummaryCard from '../components/ContractSummaryCard';
+import RiskScoreBadge, { RiskScoreDetailCard } from '../components/RiskScoreBadge';
 
 const statusConfig: Record<string, { label: string; color: string; bg: string }> = {
   draft: { label: '草稿', color: 'text-gray-600', bg: 'bg-gray-100' },
@@ -43,6 +47,8 @@ export default function ContractDetail() {
   const [versions, setVersions] = useState<Contract[]>([]);
   const [selectedClause, setSelectedClause] = useState<string | null>(null);
   const [filterDiff, setFilterDiff] = useState<'all' | 'changed' | 'new' | 'missing'>('all');
+  const [summary, setSummary] = useState<ContractSummary | null>(null);
+  const [riskDetail, setRiskDetail] = useState<RiskScoreDetail | null>(null);
 
   const handleComment = useCallback((comment: Comment) => {
     setComments(prev => [comment, ...prev]);
@@ -59,6 +65,15 @@ export default function ContractDetail() {
     setContract(contract);
   }, []);
 
+  const handleRiskScoreUpdate = useCallback((data: { contract: Contract; riskDetail: RiskScoreDetail }) => {
+    setContract(data.contract);
+    setRiskDetail(data.riskDetail);
+  }, []);
+
+  const handleSummaryUpdate = useCallback((updatedSummary: ContractSummary) => {
+    setSummary(updatedSummary);
+  }, []);
+
   useEffect(() => {
     if (!id) return;
 
@@ -68,14 +83,16 @@ export default function ContractDetail() {
     onComment(handleComment);
     onApprovalUpdate(handleApprovalUpdate);
     onContractStatus(handleContractStatus);
+    onRiskScoreUpdate(handleRiskScoreUpdate);
 
     return () => {
       leaveContract(id);
       offComment(handleComment);
       offApprovalUpdate(handleApprovalUpdate);
       offContractStatus(handleContractStatus);
+      offRiskScoreUpdate(handleRiskScoreUpdate);
     };
-  }, [id, handleComment, handleApprovalUpdate, handleContractStatus]);
+  }, [id, handleComment, handleApprovalUpdate, handleContractStatus, handleRiskScoreUpdate]);
 
   async function loadData() {
     if (!id) return;
@@ -89,6 +106,8 @@ export default function ContractDetail() {
       ]);
       setContract(compareData.contract);
       setDiffs(compareData.diffs);
+      setSummary(compareData.summary);
+      setRiskDetail(compareData.riskDetail);
       setComments(commentData);
       setApprovalNodes(approvalData.nodes);
       setVersions(versionData);
@@ -180,6 +199,7 @@ export default function ContractDetail() {
               <span className={`px-3 py-1 rounded-full text-sm font-medium ${statusConfig[contract.status].bg} ${statusConfig[contract.status].color}`}>
                 {statusConfig[contract.status].label}
               </span>
+              <RiskScoreBadge score={contract.riskScore} size="md" />
               {hasHighRisk && (
                 <span className="px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-700">
                   ⚠️ 含高风险条款
@@ -193,6 +213,16 @@ export default function ContractDetail() {
           </div>
         </div>
       </div>
+
+      {summary && (
+        <div className="mb-6">
+          <ContractSummaryCard
+            contractId={contract.id}
+            initialSummary={summary}
+            onSummaryUpdate={handleSummaryUpdate}
+          />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
         <div className="xl:col-span-3 space-y-6">
@@ -351,9 +381,13 @@ export default function ContractDetail() {
             onApprovalUpdate={reloadApproval}
           />
 
+          {riskDetail && (
+            <RiskScoreDetailCard riskDetail={riskDetail} />
+          )}
+
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
             <div className="px-4 py-3 bg-gray-50 border-b border-gray-100">
-              <h4 className="font-medium text-gray-900">📊 风险概览</h4>
+              <h4 className="font-medium text-gray-900">📊 风险批注概览</h4>
             </div>
             <div className="p-4 space-y-3">
               <div className="flex items-center justify-between text-sm">

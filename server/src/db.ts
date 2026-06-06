@@ -37,9 +37,26 @@ export async function getDb() {
         submitted_by_name TEXT NOT NULL,
         current_approver_role TEXT,
         has_high_risk INTEGER NOT NULL DEFAULT 0,
+        risk_score INTEGER NOT NULL DEFAULT 0,
         expiry_date TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS contract_summaries (
+        id TEXT PRIMARY KEY,
+        contract_id TEXT NOT NULL UNIQUE,
+        party_a TEXT,
+        party_b TEXT,
+        contract_amount TEXT,
+        effective_date TEXT,
+        expiry_date TEXT,
+        payment_method TEXT,
+        penalty_ratio TEXT,
+        confidentiality_period TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE
       );
 
       CREATE TABLE IF NOT EXISTS warning_rules (
@@ -107,6 +124,8 @@ export async function getDb() {
       CREATE INDEX IF NOT EXISTS idx_warning_records_contract ON warning_records(contract_id);
       CREATE INDEX IF NOT EXISTS idx_warning_records_status ON warning_records(status);
       CREATE INDEX IF NOT EXISTS idx_warning_records_level ON warning_records(warning_level);
+      CREATE INDEX IF NOT EXISTS idx_contracts_risk_score ON contracts(risk_score);
+      CREATE INDEX IF NOT EXISTS idx_contract_summaries_contract ON contract_summaries(contract_id);
     `);
   }
   return db;

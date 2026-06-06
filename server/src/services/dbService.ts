@@ -1,5 +1,5 @@
 import { getDb } from '../db';
-import { Contract, Template, Comment, ApprovalNode, User, ApprovalRole, ApprovalStatus, WarningRule, WarningRecord, WarningLevel, WarningRecordStatus } from '../types';
+import { Contract, Template, Comment, ApprovalNode, User, ApprovalRole, ApprovalStatus, WarningRule, WarningRecord, WarningLevel, WarningRecordStatus, ContractSummary } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function getTemplates(): Promise<Template[]> {
@@ -212,10 +212,142 @@ function rowToContract(row: any): Contract {
     submittedByName: row.submitted_by_name,
     currentApproverRole: row.current_approver_role,
     hasHighRisk: row.has_high_risk === 1,
+    riskScore: row.risk_score || 0,
     expiryDate: row.expiry_date || undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+}
+
+export async function updateContractRiskScore(id: string, riskScore: number): Promise<void> {
+  const now = new Date().toISOString();
+  const db = await getDb();
+  await db.run(`
+    UPDATE contracts 
+    SET risk_score = ?, updated_at = ?
+    WHERE id = ?
+  `, riskScore, now, id);
+}
+
+export async function getContractSummary(contractId: string): Promise<ContractSummary | null> {
+  const db = await getDb();
+  const row = await db.get('SELECT * FROM contract_summaries WHERE contract_id = ?', contractId);
+  if (!row) return null;
+  return {
+    id: row.id,
+    contractId: row.contract_id,
+    partyA: row.party_a,
+    partyB: row.party_b,
+    contractAmount: row.contract_amount,
+    effectiveDate: row.effective_date,
+    expiryDate: row.expiry_date,
+    paymentMethod: row.payment_method,
+    penaltyRatio: row.penalty_ratio,
+    confidentialityPeriod: row.confidentiality_period,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+export async function createContractSummary(data: Omit<ContractSummary, 'id' | 'createdAt' | 'updatedAt'>): Promise<ContractSummary> {
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  const db = await getDb();
+  await db.run(`
+    INSERT INTO contract_summaries (
+      id, contract_id, party_a, party_b, contract_amount, effective_date,
+      expiry_date, payment_method, penalty_ratio, confidentiality_period,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, id, data.contractId, data.partyA, data.partyB, data.contractAmount,
+    data.effectiveDate, data.expiryDate, data.paymentMethod, data.penaltyRatio,
+    data.confidentialityPeriod, now, now);
+
+  return getContractSummary(data.contractId) as Promise<ContractSummary>;
+}
+
+export async function updateContractSummary(contractId: string, data: Partial<Omit<ContractSummary, 'id' | 'contractId' | 'createdAt' | 'updatedAt'>>): Promise<ContractSummary | null> {
+  const now = new Date().toISOString();
+  const db = await getDb();
+  
+  const existing = await getContractSummary(contractId);
+  if (!existing) {
+    return null;
+  }
+
+  const fields: string[] = [];
+  const values: any[] = [];
+
+  if (data.partyA !== undefined) {
+    fields.push('party_a = ?');
+    values.push(data.partyA);
+  }
+  if (data.partyB !== undefined) {
+    fields.push('party_b = ?');
+    values.push(data.partyB);
+  }
+  if (data.contractAmount !== undefined) {
+    fields.push('contract_amount = ?');
+    values.push(data.contractAmount);
+  }
+  if (data.effectiveDate !== undefined) {
+    fields.push('effective_date = ?');
+    values.push(data.effectiveDate);
+  }
+  if (data.expiryDate !== undefined) {
+    fields.push('expiry_date = ?');
+    values.push(data.expiryDate);
+  }
+  if (data.paymentMethod !== undefined) {
+    fields.push('payment_method = ?');
+    values.push(data.paymentMethod);
+  }
+  if (data.penaltyRatio !== undefined) {
+    fields.push('penalty_ratio = ?');
+    values.push(data.penaltyRatio);
+  }
+  if (data.confidentialityPeriod !== undefined) {
+    fields.push('confidentiality_period = ?');
+    values.push(data.confidentialityPeriod);
+  }
+
+  fields.push('updated_at = ?');
+  values.push(now);
+  values.push(contractId);
+
+  await db.run(`
+    UPDATE contract_summaries 
+    SET ${fields.join(', ')}
+    WHERE contract_id = ?
+  `, ...values);
+
+  return getContractSummary(contractId);
+}
+
+export async function getPendingContractsByRiskScore(filters?: {
+  riskLevel?: 'low' | 'medium' | 'high';
+}): Promise<Contract[]> {
+  const db = await getDb();
+  let query = `
+    SELECT * FROM contracts 
+    WHERE status = 'pending'
+  `;
+  const params: any[] = [];
+
+  if (filters?.riskLevel) {
+    if (filters.riskLevel === 'low') {
+      query += ' AND risk_score <= 30';
+    } else if (filters.riskLevel === 'medium') {
+      query += ' AND risk_score > 30 AND risk_score <= 60';
+    } else if (filters.riskLevel === 'high') {
+      query += ' AND risk_score > 60';
+    }
+  }
+
+  query += ' ORDER BY risk_score DESC, created_at DESC';
+  
+  const rows = await db.all(query, ...params);
+  return rows.map(rowToContract);
 }
 
 export async function updateContractExpiryDate(id: string, expiryDate: string): Promise<void> {

@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Template, Contract, Comment, ApprovalNode, CompareResult, User, WarningRule, WarningRecord, WarningStats, WarningLevel, WarningRecordStatus } from '../types';
+import { Template, Contract, Comment, ApprovalNode, CompareResult, User, WarningRule, WarningRecord, WarningStats, WarningLevel, WarningRecordStatus, ContractSummary, RiskScoreDetail } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -28,14 +28,27 @@ const baseContractApi = {
   compare: (templateId: string, rawContent: string) =>
     api.post<CompareResult>('/compare', { templateId, rawContent }).then(r => r.data),
   getCompare: (id: string) =>
-    api.get<{ contract: Contract; template: Template; diffs: any[] }>(`/contracts/${id}/compare`).then(r => r.data),
-  getVersions: (id: string) => api.get<Contract[]>(`/contracts/${id}/versions`).then(r => r.data)
+    api.get<{ contract: Contract; template: Template; diffs: any[]; summary: ContractSummary; riskDetail: RiskScoreDetail }>(`/contracts/${id}/compare`).then(r => r.data),
+  getVersions: (id: string) => api.get<Contract[]>(`/contracts/${id}/versions`).then(r => r.data),
+  getSummary: (id: string) =>
+    api.get<ContractSummary>(`/contracts/${id}/summary`).then(r => r.data),
+  updateSummary: (id: string, data: Partial<Omit<ContractSummary, 'id' | 'contractId' | 'createdAt' | 'updatedAt'>>) =>
+    api.put<ContractSummary>(`/contracts/${id}/summary`, data).then(r => r.data),
+  reExtractSummary: (id: string) =>
+    api.post<ContractSummary>(`/contracts/${id}/summary/re-extract`).then(r => r.data),
+  getRiskScore: (id: string) =>
+    api.get<RiskScoreDetail>(`/contracts/${id}/risk-score`).then(r => r.data)
 };
 
 export const contractApi = {
   ...baseContractApi,
   updateExpiry: (id: string, expiryDate: string) =>
     api.put<Contract>(`/contracts/${id}/expiry`, { expiryDate }).then(r => r.data)
+};
+
+export const riskRankingApi = {
+  list: (filters?: { riskLevel?: 'low' | 'medium' | 'high' }) =>
+    api.get<Array<{ rank: number } & Contract>>('/risk-ranking', { params: filters }).then(r => r.data)
 };
 
 export const commentApi = {

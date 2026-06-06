@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { contractApi, warningRecordApi } from '../services/api';
 import { Contract, WarningRecord } from '../types';
+import RiskScoreBadge, { getRiskScoreBgColor } from '../components/RiskScoreBadge';
+import { joinContract, leaveContract, onRiskScoreUpdate, offRiskScoreUpdate, initSocket } from '../services/socket';
 
 const statusConfig: Record<string, { label: string; color: string; bg: string }> = {
   draft: { label: '草稿', color: 'text-gray-600', bg: 'bg-gray-100' },
@@ -23,9 +25,39 @@ export default function ContractList() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('all');
 
-  useEffect(() => {
-    loadContracts();
+  const handleRiskScoreUpdate = useCallback((data: { contract: Contract }) => {
+    setContracts(prev => prev.map(c => 
+      c.id === data.contract.id ? { ...c, riskScore: data.contract.riskScore } : c
+    ));
   }, []);
+
+  useEffect(() => {
+    initSocket();
+    loadContracts();
+
+    contracts.forEach(contract => {
+      joinContract(contract.id);
+    });
+    onRiskScoreUpdate(handleRiskScoreUpdate);
+
+    return () => {
+      contracts.forEach(contract => {
+        leaveContract(contract.id);
+      });
+      offRiskScoreUpdate(handleRiskScoreUpdate);
+    };
+  }, []);
+
+  useEffect(() => {
+    contracts.forEach(contract => {
+      joinContract(contract.id);
+    });
+    return () => {
+      contracts.forEach(contract => {
+        leaveContract(contract.id);
+      });
+    };
+  }, [contracts.map(c => c.id).join(',')]);
 
   async function loadContracts() {
     try {
@@ -134,62 +166,68 @@ export default function ContractList() {
           </div>
         ) : (
           <div className="divide-y divide-gray-100">
-            {filteredContracts.map(contract => (
-              <Link
-                key={contract.id}
-                to={`/contract/${contract.id}`}
-                className="block px-6 py-4 hover:bg-gray-50 transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center space-x-3 flex-wrap">
-                      <h3 className="font-medium text-gray-900">{contract.title}</h3>
-                      <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${statusConfig[contract.status]?.bg} ${statusConfig[contract.status]?.color}`}>
-                        {statusConfig[contract.status]?.label}
-                      </span>
-                      {contract.hasHighRisk && (
-                        <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                          ⚠️ 高风险
+            {filteredContracts.map(contract => {
+              const isHighRisk = contract.riskScore > 60;
+              return (
+                <Link
+                  key={contract.id}
+                  to={`/contract/${contract.id}`}
+                  className={`block px-6 py-4 transition-colors ${
+                    isHighRisk ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center space-x-3 flex-wrap">
+                        <h3 className="font-medium text-gray-900">{contract.title}</h3>
+                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${statusConfig[contract.status]?.bg} ${statusConfig[contract.status]?.color}`}>
+                          {statusConfig[contract.status]?.label}
                         </span>
-                      )}
-                      {getWarningForContract(contract.id) && (
-                        <span
-                          className="px-2.5 py-0.5 rounded-full text-xs font-medium animate-pulse"
-                          style={{
-                            backgroundColor: `${getWarningForContract(contract.id)!.warningColor}20`,
-                            color: getWarningForContract(contract.id)!.warningColor
-                          }}
-                        >
-                          ⚠️ {getDaysRemaining(contract.expiryDate)}天后到期
-                        </span>
-                      )}
-                      <span className="text-xs text-gray-400">v{contract.version}</span>
-                    </div>
-                    <div className="mt-2 flex items-center space-x-4 text-sm text-gray-500 flex-wrap">
-                      <span>提交人：{contract.submittedByName}</span>
-                      {contract.expiryDate && (
-                        <>
-                          <span>•</span>
-                          <span className={getDaysRemaining(contract.expiryDate)! <= 7 ? 'text-red-600 font-medium' : ''}>
-                            到期：{new Date(contract.expiryDate).toLocaleDateString('zh-CN')}
-                            {getDaysRemaining(contract.expiryDate)! >= 0 && ` (剩余${getDaysRemaining(contract.expiryDate)}天)`}
+                        <RiskScoreBadge score={contract.riskScore} size="sm" />
+                        {contract.hasHighRisk && (
+                          <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+                            ⚠️ 高风险
                           </span>
-                        </>
-                      )}
-                      <span>•</span>
-                      {contract.currentApproverRole && (
-                        <>
-                          <span>当前审批：{roleNames[contract.currentApproverRole]}</span>
-                          <span>•</span>
-                        </>
-                      )}
-                      <span>{new Date(contract.updatedAt).toLocaleString('zh-CN')}</span>
+                        )}
+                        {getWarningForContract(contract.id) && (
+                          <span
+                            className="px-2.5 py-0.5 rounded-full text-xs font-medium animate-pulse"
+                            style={{
+                              backgroundColor: `${getWarningForContract(contract.id)!.warningColor}20`,
+                              color: getWarningForContract(contract.id)!.warningColor
+                            }}
+                          >
+                            ⚠️ {getDaysRemaining(contract.expiryDate)}天后到期
+                          </span>
+                        )}
+                        <span className="text-xs text-gray-400">v{contract.version}</span>
+                      </div>
+                      <div className="mt-2 flex items-center space-x-4 text-sm text-gray-500 flex-wrap">
+                        <span>提交人：{contract.submittedByName}</span>
+                        {contract.expiryDate && (
+                          <>
+                            <span>•</span>
+                            <span className={getDaysRemaining(contract.expiryDate)! <= 7 ? 'text-red-600 font-medium' : ''}>
+                              到期：{new Date(contract.expiryDate).toLocaleDateString('zh-CN')}
+                              {getDaysRemaining(contract.expiryDate)! >= 0 && ` (剩余${getDaysRemaining(contract.expiryDate)}天)`}
+                            </span>
+                          </>
+                        )}
+                        <span>•</span>
+                        {contract.currentApproverRole && (
+                          <>
+                            <span>当前审批：{roleNames[contract.currentApproverRole]}</span>
+                            <span>•</span>
+                          </>
+                        )}
+                        <span>{new Date(contract.updatedAt).toLocaleString('zh-CN')}</span>
+                      </div>
                     </div>
+                    <div className="ml-4 text-gray-400">→</div>
                   </div>
-                  <div className="ml-4 text-gray-400">→</div>
-                </div>
-              </Link>
-            ))}
+                </Link>
+              );
+            })}
           </div>
         )}
       </div>

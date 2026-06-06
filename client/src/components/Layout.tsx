@@ -28,6 +28,7 @@ export default function Layout({ children }: LayoutProps) {
   const navItems = [
     { path: '/', label: '合同列表', icon: '📋' },
     { path: '/upload', label: '上传合同', icon: '📤' },
+    { path: '/risk-ranking', label: '风险排行', icon: '📊' },
     { path: '/warnings', label: '到期预警', icon: '⚠️' }
   ];
 

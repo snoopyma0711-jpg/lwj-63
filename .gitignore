@@ -5,3 +5,4 @@ dist
 .env
 .env.local
 server/data/*.db
+训练记录.md

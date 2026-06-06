@@ -1,11 +1,12 @@
 import { Server as HTTPServer } from 'http';
 import { Server, Socket } from 'socket.io';
-import { Comment, Contract, ApprovalNode, WarningRecord, WarningStats } from './types';
+import { Comment, Contract, ApprovalNode, WarningRecord, WarningStats, RiskScoreDetail } from './types';
 
 let io: Server;
 
 const contractRooms = new Map<string, Set<string>>();
 const warningRoom = 'warning:dashboard';
+const riskRankingRoom = 'risk:ranking';
 
 export function initWebSocket(server: HTTPServer): void {
   io = new Server(server, {
@@ -41,6 +42,16 @@ export function initWebSocket(server: HTTPServer): void {
     socket.on('leave:warning', () => {
       socket.leave(warningRoom);
       console.log(`Socket ${socket.id} left warning dashboard`);
+    });
+
+    socket.on('join:risk-ranking', () => {
+      socket.join(riskRankingRoom);
+      console.log(`Socket ${socket.id} joined risk ranking`);
+    });
+
+    socket.on('leave:risk-ranking', () => {
+      socket.leave(riskRankingRoom);
+      console.log(`Socket ${socket.id} left risk ranking`);
     });
 
     socket.on('disconnect', () => {
@@ -82,5 +93,15 @@ export function broadcastWarningStatsUpdate(stats: WarningStats): void {
 export function broadcastWarningRecordUpdate(records: WarningRecord[]): void {
   if (io) {
     io.to(warningRoom).emit('warning:records', records);
+  }
+}
+
+export function broadcastRiskScoreUpdate(contractId: string, data: {
+  contract: Contract;
+  riskDetail: RiskScoreDetail;
+}): void {
+  if (io) {
+    io.to(`contract:${contractId}`).emit('risk:score-update', data);
+    io.to('risk:ranking').emit('risk:ranking-update');
   }
 }

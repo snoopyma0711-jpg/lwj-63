@@ -6,6 +6,7 @@ import ContractList from './pages/ContractList';
 import ContractUpload from './pages/ContractUpload';
 import ContractDetail from './pages/ContractDetail';
 import WarningDashboard from './pages/WarningDashboard';
+import RiskRanking from './pages/RiskRanking';
 import { getCurrentUser, onUserChange } from './store/auth';
 import { User } from './types';
 
@@ -27,6 +28,7 @@ function App() {
         <Route path="/upload" element={<ContractUpload />} />
         <Route path="/upload/:parentId" element={<ContractUpload />} />
         <Route path="/contract/:id" element={<ContractDetail />} />
+        <Route path="/risk-ranking" element={<RiskRanking />} />
         <Route path="/warnings" element={<WarningDashboard />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

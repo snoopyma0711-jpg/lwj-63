@@ -63,9 +63,42 @@ export interface Contract {
   submittedByName: string;
   currentApproverRole: ApprovalRole | null;
   hasHighRisk: boolean;
+  riskScore: number;
   expiryDate?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ContractSummary {
+  id: string;
+  contractId: string;
+  partyA: string | null;
+  partyB: string | null;
+  contractAmount: string | null;
+  effectiveDate: string | null;
+  expiryDate: string | null;
+  paymentMethod: string | null;
+  penaltyRatio: string | null;
+  confidentialityPeriod: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type RiskScoreLevel = 'low' | 'medium' | 'high';
+
+export interface RiskScoreDetail {
+  totalScore: number;
+  level: RiskScoreLevel;
+  modifiedClauses: number;
+  missingClauses: number;
+  newClauses: number;
+  highRiskComments: number;
+  breakdown: {
+    modifiedScore: number;
+    missingScore: number;
+    newScore: number;
+    highRiskCommentScore: number;
+  };
 }
 
 export type WarningLevel = 'yellow' | 'orange' | 'red';
