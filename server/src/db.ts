@@ -104,9 +104,20 @@ export async function getDb() {
         user_name TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'pending',
         comment TEXT,
+        arrived_at TEXT,
+        processed_at TEXT,
+        processing_duration_ms INTEGER,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS approval_timeout_configs (
+        id TEXT PRIMARY KEY,
+        role TEXT NOT NULL UNIQUE,
+        threshold_hours INTEGER NOT NULL DEFAULT 24,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS users (

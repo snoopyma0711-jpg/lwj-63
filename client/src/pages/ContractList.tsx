@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { contractApi, warningRecordApi } from '../services/api';
-import { Contract, WarningRecord } from '../types';
+import { contractApi, warningRecordApi, approvalEfficiencyApi } from '../services/api';
+import { Contract, WarningRecord, ApprovalEfficiencyStats } from '../types';
 import RiskScoreBadge, { getRiskScoreBgColor } from '../components/RiskScoreBadge';
-import { joinContract, leaveContract, onRiskScoreUpdate, offRiskScoreUpdate, initSocket } from '../services/socket';
+import { joinContract, leaveContract, onRiskScoreUpdate, offRiskScoreUpdate, initSocket, joinEfficiency, leaveEfficiency, onEfficiencyUpdate, offEfficiencyUpdate } from '../services/socket';
 
 const statusConfig: Record<string, { label: string; color: string; bg: string }> = {
   draft: { label: '草稿', color: 'text-gray-600', bg: 'bg-gray-100' },
@@ -22,6 +22,7 @@ const roleNames: Record<string, string> = {
 export default function ContractList() {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [warningRecords, setWarningRecords] = useState<WarningRecord[]>([]);
+  const [efficiencyStats, setEfficiencyStats] = useState<ApprovalEfficiencyStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('all');
 
@@ -31,6 +32,10 @@ export default function ContractList() {
     ));
   }, []);
 
+  const handleEfficiencyUpdate = useCallback((stats: ApprovalEfficiencyStats) => {
+    setEfficiencyStats(stats);
+  }, []);
+
   useEffect(() => {
     initSocket();
     loadContracts();
@@ -38,13 +43,17 @@ export default function ContractList() {
     contracts.forEach(contract => {
       joinContract(contract.id);
     });
+    joinEfficiency();
     onRiskScoreUpdate(handleRiskScoreUpdate);
+    onEfficiencyUpdate(handleEfficiencyUpdate);
 
     return () => {
       contracts.forEach(contract => {
         leaveContract(contract.id);
       });
+      leaveEfficiency();
       offRiskScoreUpdate(handleRiskScoreUpdate);
+      offEfficiencyUpdate(handleEfficiencyUpdate);
     };
   }, []);
 
@@ -61,17 +70,24 @@ export default function ContractList() {
 
   async function loadContracts() {
     try {
-      const [contractsData, warningsData] = await Promise.all([
+      const [contractsData, warningsData, efficiencyData] = await Promise.all([
         contractApi.list(),
-        warningRecordApi.list({ status: 'pending' })
+        warningRecordApi.list({ status: 'pending' }),
+        approvalEfficiencyApi.getStats()
       ]);
       setContracts(contractsData);
       setWarningRecords(warningsData);
+      setEfficiencyStats(efficiencyData);
     } catch (error) {
       console.error('加载合同列表失败:', error);
     } finally {
       setLoading(false);
     }
+  }
+
+  function isContractTimedOut(contractId: string): boolean {
+    if (!efficiencyStats) return false;
+    return efficiencyStats.timedOutContracts.some(tc => tc.contractId === contractId);
   }
 
   function getDaysRemaining(expiryDate?: string): number | null {
@@ -187,6 +203,11 @@ export default function ContractList() {
                         {contract.hasHighRisk && (
                           <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
                             ⚠️ 高风险
+                          </span>
+                        )}
+                        {isContractTimedOut(contract.id) && (
+                          <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 animate-pulse">
+                            ⏰ 审批超时
                           </span>
                         )}
                         {getWarningForContract(contract.id) && (

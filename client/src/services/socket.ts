@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { Comment, Contract, ApprovalNode, WarningRecord, WarningStats, RiskScoreDetail } from '../types';
+import { Comment, Contract, ApprovalNode, WarningRecord, WarningStats, RiskScoreDetail, ApprovalEfficiencyStats } from '../types';
 
 let socket: Socket | null = null;
 
@@ -137,5 +137,29 @@ export function onRiskRankingUpdate(callback: () => void): void {
 export function offRiskRankingUpdate(callback: () => void): void {
   if (socket) {
     socket.off('risk:ranking-update', callback);
+  }
+}
+
+export function joinEfficiency(): void {
+  if (socket) {
+    socket.emit('join:efficiency');
+  }
+}
+
+export function leaveEfficiency(): void {
+  if (socket) {
+    socket.emit('leave:efficiency');
+  }
+}
+
+export function onEfficiencyUpdate(callback: (stats: ApprovalEfficiencyStats) => void): void {
+  if (socket) {
+    socket.on('efficiency:update', callback);
+  }
+}
+
+export function offEfficiencyUpdate(callback: (stats: ApprovalEfficiencyStats) => void): void {
+  if (socket) {
+    socket.off('efficiency:update', callback);
   }
 }

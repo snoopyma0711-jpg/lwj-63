@@ -47,6 +47,9 @@ export interface ApprovalNode {
   userName: string;
   status: 'pending' | 'approved' | 'rejected' | 'transferred';
   comment?: string;
+  arrivedAt?: string;
+  processedAt?: string;
+  processingDurationMs?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -150,4 +153,47 @@ export interface User {
   id: string;
   name: string;
   role: ApprovalRole;
+}
+
+export interface ApprovalTimeoutConfig {
+  id: string;
+  role: ApprovalRole;
+  thresholdHours: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApprovalNodeWithTimeout extends ApprovalNode {
+  currentDurationMs: number;
+  isTimedOut: boolean;
+  timeoutThresholdMs: number;
+}
+
+export interface RoleApprovalStats {
+  role: ApprovalRole;
+  roleName: string;
+  averageDurationMs: number;
+  totalProcessed: number;
+  timedOutCount: number;
+}
+
+export interface ApprovalEfficiencyStats {
+  byRole: RoleApprovalStats[];
+  timedOutContracts: Array<{
+    contractId: string;
+    contractTitle: string;
+    currentRole: ApprovalRole;
+    timeoutDurationMs: number;
+    submittedAt: string;
+    riskScore: number;
+  }>;
+  weeklyStats: {
+    totalProcessed: number;
+    approvedCount: number;
+    rejectedCount: number;
+    passRate: number;
+    weekStart: string;
+    weekEnd: string;
+  };
+  lastUpdated: string;
 }

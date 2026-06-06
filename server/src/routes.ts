@@ -24,11 +24,15 @@ import {
   createContractSummary,
   updateContractSummary,
   updateContractRiskScore,
-  getPendingContractsByRiskScore
+  getPendingContractsByRiskScore,
+  getApprovalTimeoutConfigs,
+  getApprovalTimeoutConfig,
+  setApprovalTimeoutConfig
 } from './services/dbService';
 import { startApproval, processApproval, getApprovalChainStatus } from './services/approvalService';
-import { broadcastComment, broadcastApprovalUpdate, broadcastStatusUpdate, broadcastWarningStatsUpdate, broadcastWarningRecordUpdate, broadcastRiskScoreUpdate } from './websocket';
-import { RiskLevel, ApprovalRole, WarningLevel, WarningRecordStatus } from './types';
+import { getApprovalEfficiencyStats } from './services/approvalEfficiencyService';
+import { broadcastComment, broadcastApprovalUpdate, broadcastStatusUpdate, broadcastWarningStatsUpdate, broadcastWarningRecordUpdate, broadcastRiskScoreUpdate, broadcastEfficiencyStats } from './websocket';
+import { RiskLevel, ApprovalRole, WarningLevel, WarningRecordStatus, ApprovalEfficiencyStats } from './types';
 import { extractContractSummary } from './services/summaryExtractionService';
 import { calculateRiskScore } from './services/riskScoringService';
 
@@ -414,6 +418,32 @@ router.get('/risk-ranking', async (req: Request, res: Response) => {
   }));
 
   res.json(contractsWithRank);
+});
+
+router.get('/approval-timeout-configs', async (req: Request, res: Response) => {
+  const configs = await getApprovalTimeoutConfigs();
+  res.json(configs);
+});
+
+router.get('/approval-timeout-configs/:role', async (req: Request, res: Response) => {
+  const config = await getApprovalTimeoutConfig(req.params.role as ApprovalRole);
+  if (!config) return res.status(404).json({ error: '配置不存在' });
+  res.json(config);
+});
+
+router.put('/approval-timeout-configs/:role', async (req: Request, res: Response) => {
+  const { thresholdHours } = req.body;
+  if (typeof thresholdHours !== 'number' || thresholdHours <= 0) {
+    return res.status(400).json({ error: '超时阈值必须为正整数' });
+  }
+  const config = await setApprovalTimeoutConfig(req.params.role as ApprovalRole, thresholdHours);
+  await broadcastEfficiencyStats();
+  res.json(config);
+});
+
+router.get('/approval-efficiency', async (req: Request, res: Response) => {
+  const stats = await getApprovalEfficiencyStats();
+  res.json(stats);
 });
 
 export default router;

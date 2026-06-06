@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Template, Contract, Comment, ApprovalNode, CompareResult, User, WarningRule, WarningRecord, WarningStats, WarningLevel, WarningRecordStatus, ContractSummary, RiskScoreDetail } from '../types';
+import { Template, Contract, Comment, ApprovalNode, ApprovalNodeWithTimeout, CompareResult, User, WarningRule, WarningRecord, WarningStats, WarningLevel, WarningRecordStatus, ContractSummary, RiskScoreDetail, ApprovalTimeoutConfig, ApprovalEfficiencyStats, ApprovalRole } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -65,7 +65,13 @@ export const commentApi = {
 
 export const approvalApi = {
   getStatus: (contractId: string) =>
-    api.get<{ nodes: ApprovalNode[]; currentRole: string | null; overallStatus: string }>(
+    api.get<{ 
+      nodes: ApprovalNode[]; 
+      nodesWithTimeout: ApprovalNodeWithTimeout[];
+      currentRole: string | null; 
+      overallStatus: string;
+      hasTimedOut: boolean;
+    }>(
       `/contracts/${contractId}/approvals`
     ).then(r => r.data),
   start: (contractId: string, userId: string, userName: string) =>
@@ -77,6 +83,17 @@ export const approvalApi = {
     userName: string;
     comment?: string;
   }) => api.post(`/contracts/${contractId}/approval`, data).then(r => r.data)
+};
+
+export const approvalTimeoutConfigApi = {
+  list: () => api.get<ApprovalTimeoutConfig[]>('/approval-timeout-configs').then(r => r.data),
+  get: (role: ApprovalRole) => api.get<ApprovalTimeoutConfig>(`/approval-timeout-configs/${role}`).then(r => r.data),
+  update: (role: ApprovalRole, thresholdHours: number) =>
+    api.put<ApprovalTimeoutConfig>(`/approval-timeout-configs/${role}`, { thresholdHours }).then(r => r.data)
+};
+
+export const approvalEfficiencyApi = {
+  getStats: () => api.get<ApprovalEfficiencyStats>('/approval-efficiency').then(r => r.data)
 };
 
 export const userApi = {

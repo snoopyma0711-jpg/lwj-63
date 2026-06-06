@@ -13,7 +13,7 @@ import {
   onRiskScoreUpdate,
   offRiskScoreUpdate
 } from '../services/socket';
-import { Contract, ClauseDiff, Comment, ApprovalNode, RiskLevel, ContractSummary, RiskScoreDetail } from '../types';
+import { Contract, ClauseDiff, Comment, ApprovalNode, ApprovalNodeWithTimeout, RiskLevel, ContractSummary, RiskScoreDetail } from '../types';
 import DiffViewer from '../components/DiffViewer';
 import CommentPanel from '../components/CommentPanel';
 import ApprovalFlow from '../components/ApprovalFlow';
@@ -44,6 +44,8 @@ export default function ContractDetail() {
   const [diffs, setDiffs] = useState<ClauseDiff[]>([]);
   const [comments, setComments] = useState<Comment[]>([]);
   const [approvalNodes, setApprovalNodes] = useState<ApprovalNode[]>([]);
+  const [approvalNodesWithTimeout, setApprovalNodesWithTimeout] = useState<ApprovalNodeWithTimeout[]>([]);
+  const [hasTimedOut, setHasTimedOut] = useState(false);
   const [versions, setVersions] = useState<Contract[]>([]);
   const [selectedClause, setSelectedClause] = useState<string | null>(null);
   const [filterDiff, setFilterDiff] = useState<'all' | 'changed' | 'new' | 'missing'>('all');
@@ -110,6 +112,8 @@ export default function ContractDetail() {
       setRiskDetail(compareData.riskDetail);
       setComments(commentData);
       setApprovalNodes(approvalData.nodes);
+      setApprovalNodesWithTimeout(approvalData.nodesWithTimeout);
+      setHasTimedOut(approvalData.hasTimedOut);
       setVersions(versionData);
 
       const firstDiff = compareData.diffs.find(d => d.hasDiff);
@@ -137,6 +141,8 @@ export default function ContractDetail() {
         contractApi.get(id)
       ]);
       setApprovalNodes(approvalData.nodes);
+      setApprovalNodesWithTimeout(approvalData.nodesWithTimeout);
+      setHasTimedOut(approvalData.hasTimedOut);
       setContract(contractData);
     } catch (error) {
       console.error('刷新审批状态失败:', error);
@@ -378,6 +384,8 @@ export default function ContractDetail() {
           <ApprovalFlow
             contract={contract}
             nodes={approvalNodes}
+            nodesWithTimeout={approvalNodesWithTimeout}
+            hasTimedOut={hasTimedOut}
             onApprovalUpdate={reloadApproval}
           />
 

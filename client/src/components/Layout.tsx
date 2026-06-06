@@ -29,6 +29,7 @@ export default function Layout({ children }: LayoutProps) {
     { path: '/', label: '合同列表', icon: '📋' },
     { path: '/upload', label: '上传合同', icon: '📤' },
     { path: '/risk-ranking', label: '风险排行', icon: '📊' },
+    { path: '/efficiency', label: '审批效率', icon: '⏱️' },
     { path: '/warnings', label: '到期预警', icon: '⚠️' }
   ];
 

@@ -7,6 +7,7 @@ import ContractUpload from './pages/ContractUpload';
 import ContractDetail from './pages/ContractDetail';
 import WarningDashboard from './pages/WarningDashboard';
 import RiskRanking from './pages/RiskRanking';
+import ApprovalEfficiency from './pages/ApprovalEfficiency';
 import { getCurrentUser, onUserChange } from './store/auth';
 import { User } from './types';
 
@@ -30,6 +31,7 @@ function App() {
         <Route path="/contract/:id" element={<ContractDetail />} />
         <Route path="/risk-ranking" element={<RiskRanking />} />
         <Route path="/warnings" element={<WarningDashboard />} />
+        <Route path="/efficiency" element={<ApprovalEfficiency />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

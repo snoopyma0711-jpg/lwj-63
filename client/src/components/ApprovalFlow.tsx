@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { ApprovalNode, Contract, ApprovalRole } from '../types';
+import { useState, useEffect, useRef } from 'react';
+import { ApprovalNode, Contract, ApprovalRole, ApprovalNodeWithTimeout } from '../types';
 import { approvalApi } from '../services/api';
 import { getCurrentUser } from '../store/auth';
 import { useNavigate } from 'react-router-dom';
@@ -7,7 +7,27 @@ import { useNavigate } from 'react-router-dom';
 interface ApprovalFlowProps {
   contract: Contract;
   nodes: ApprovalNode[];
+  nodesWithTimeout: ApprovalNodeWithTimeout[];
+  hasTimedOut: boolean;
   onApprovalUpdate: () => void;
+}
+
+export function formatDuration(ms: number): string {
+  if (ms < 0) ms = 0;
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (days > 0) {
+    return `${days}天${hours % 24}小时`;
+  } else if (hours > 0) {
+    return `${hours}小时${minutes % 60}分钟`;
+  } else if (minutes > 0) {
+    return `${minutes}分钟${seconds % 60}秒`;
+  } else {
+    return `${seconds}秒`;
+  }
 }
 
 const roleNames: Record<string, string> = {
@@ -23,14 +43,39 @@ const statusConfig: Record<string, { label: string; color: string; icon: string 
   transferred: { label: '已转交', color: 'text-blue-600', icon: '↩️' }
 };
 
-export default function ApprovalFlow({ contract, nodes, onApprovalUpdate }: ApprovalFlowProps) {
+export default function ApprovalFlow({ contract, nodes, nodesWithTimeout, hasTimedOut, onApprovalUpdate }: ApprovalFlowProps) {
   const navigate = useNavigate();
   const user = getCurrentUser();
   const [action, setAction] = useState<'approve' | 'reject' | 'transfer' | null>(null);
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [currentTime, setCurrentTime] = useState(Date.now());
+  const timerRef = useRef<number | null>(null);
 
   const canApprove = user && contract.currentApproverRole === user.role && contract.status === 'pending';
+
+  useEffect(() => {
+    timerRef.current = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 1000);
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, []);
+
+  function getCurrentDuration(node: ApprovalNodeWithTimeout): number {
+    if (node.status === 'pending' && node.arrivedAt) {
+      return currentTime - new Date(node.arrivedAt).getTime();
+    }
+    return node.currentDurationMs;
+  }
+
+  function isTimedOut(node: ApprovalNodeWithTimeout): boolean {
+    if (node.status !== 'pending') return node.isTimedOut;
+    return getCurrentDuration(node) > node.timeoutThresholdMs;
+  }
 
   async function handleApproval() {
     if (!action || !user) return;
@@ -80,7 +125,14 @@ export default function ApprovalFlow({ contract, nodes, onApprovalUpdate }: Appr
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
       <div className="px-4 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
-        <h4 className="font-medium text-gray-900">🔄 审批流转</h4>
+        <div className="flex items-center space-x-2">
+          <h4 className="font-medium text-gray-900">🔄 审批流转</h4>
+          {hasTimedOut && contract.status === 'pending' && (
+            <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded-full animate-pulse">
+              ⚠️ 存在超时审批
+            </span>
+          )}
+        </div>
         {contract.status === 'draft' && (
           <button
             onClick={handleStartApproval}
@@ -104,27 +156,39 @@ export default function ApprovalFlow({ contract, nodes, onApprovalUpdate }: Appr
         <div className="flex items-center justify-between mb-6">
           {roleOrder.map((role, index) => {
             const node = nodes.find(n => n.role === role);
+            const nodeWithTimeout = nodesWithTimeout.find(n => n.role === role);
             const isActive = contract.currentApproverRole === role;
             const isCompleted = node && node.status !== 'pending';
+            const timedOut = nodeWithTimeout && isTimedOut(nodeWithTimeout);
+            const currentDuration = nodeWithTimeout ? getCurrentDuration(nodeWithTimeout) : 0;
 
             return (
               <div key={role} className="flex items-center">
                 <div className="flex flex-col items-center">
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-semibold border-2 transition-all ${
+                  <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-semibold border-2 transition-all relative ${
                     isCompleted
                       ? node?.status === 'approved'
                         ? 'bg-green-500 border-green-500 text-white'
                         : node?.status === 'rejected'
                         ? 'bg-red-500 border-red-500 text-white'
                         : 'bg-blue-500 border-blue-500 text-white'
+                      : isActive && timedOut
+                      ? 'bg-red-100 border-red-500 text-red-700 ring-4 ring-red-100'
                       : isActive
                       ? 'bg-yellow-100 border-yellow-500 text-yellow-700 ring-4 ring-yellow-100'
                       : 'bg-gray-100 border-gray-300 text-gray-400'
                   }`}>
                     {isCompleted ? statusConfig[node!.status].icon : roleNames[role].charAt(0)}
+                    {timedOut && isActive && (
+                      <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full animate-pulse flex items-center justify-center">
+                        <span className="text-white text-xs">!</span>
+                      </span>
+                    )}
                   </div>
                   <div className="mt-2 text-center">
-                    <p className={`text-sm font-medium ${isActive ? 'text-yellow-600' : 'text-gray-700'}`}>
+                    <p className={`text-sm font-medium ${
+                      timedOut && isActive ? 'text-red-600' : isActive ? 'text-yellow-600' : 'text-gray-700'
+                    }`}>
                       {roleNames[role]}
                     </p>
                     <p className={`text-xs ${
@@ -132,6 +196,14 @@ export default function ApprovalFlow({ contract, nodes, onApprovalUpdate }: Appr
                     }`}>
                       {node ? statusConfig[node.status].label : '待开始'}
                     </p>
+                    {nodeWithTimeout && node && (node.status !== 'pending' || node.arrivedAt) && (
+                      <p className={`text-xs mt-1 ${
+                        timedOut ? 'text-red-600 font-medium' : 'text-gray-400'
+                      }`}>
+                        {node.status === 'pending' ? '已耗时' : '耗时'}：{formatDuration(currentDuration)}
+                        {timedOut && <span className="ml-1 text-red-600">⚠️</span>}
+                      </p>
+                    )}
                   </div>
                 </div>
                 {index < roleOrder.length - 1 && (

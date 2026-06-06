@@ -1,5 +1,6 @@
 import { getDb } from './db';
-import { createTemplate, createUser, getUser, createContract, updateContractStatus } from './services/dbService';
+import { createTemplate, createUser, getUser, createContract, updateContractStatus, createApprovalNode, updateApprovalNodeArrivedAt } from './services/dbService';
+import { startApproval } from './services/approvalService';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function seedData(): Promise<void> {
@@ -139,6 +140,71 @@ ${sample.title} 相关服务内容。
     });
 
     await updateContractStatus(contract.id, 'approved', null, false);
+  }
+
+  const pendingContracts = [
+    { title: '重要客户合作框架协议', hasHighRisk: true, timeoutHours: 30 },
+    { title: '年度采购合同', hasHighRisk: false, timeoutHours: 2 },
+    { title: '技术服务外包合同', hasHighRisk: false, timeoutHours: 10 },
+    { title: '战略合作协议', hasHighRisk: true, timeoutHours: 50 }
+  ];
+
+  for (const sample of pendingContracts) {
+    const content = `
+第一条 合同双方
+甲方：示例科技有限公司
+乙方：合作方公司
+
+第二条 服务内容
+${sample.title} 相关服务内容。
+
+第三条 合同期限
+本合同自签订之日起生效，有效期一年。
+
+第四条 费用及支付
+合同总金额：人民币500,000元整。
+
+第五条 保密条款
+双方应对合作过程中知悉的商业秘密承担保密义务。
+
+第六条 违约责任
+任何一方违反合同约定，应承担相应的违约责任。
+
+第七条 争议解决
+协商不成的，向甲方所在地人民法院提起诉讼。
+    `.trim();
+
+    const contract = await createContract({
+      title: sample.title,
+      templateId: serviceTemplate.id,
+      rawContent: content,
+      submittedBy: specialist.id,
+      submittedByName: specialist.name,
+      expiryDate: addDays(60)
+    });
+
+    const approvalResult = await startApproval(contract.id, specialist.id, specialist.name);
+
+    const arrivedAtDate = new Date();
+    arrivedAtDate.setHours(arrivedAtDate.getHours() - sample.timeoutHours);
+    const arrivedAt = arrivedAtDate.toISOString();
+
+    const nodes = approvalResult.nodes;
+    for (const node of nodes) {
+      if (node.role === 'specialist') {
+        await updateApprovalNodeArrivedAt(node.id, arrivedAt);
+      }
+    }
+
+    if (sample.timeoutHours > 24) {
+      await updateContractStatus(contract.id, 'pending', 'manager', sample.hasHighRisk);
+      const managerNode = nodes.find(n => n.role === 'manager');
+      if (managerNode) {
+        const managerArrivedAt = new Date();
+        managerArrivedAt.setHours(managerArrivedAt.getHours() - (sample.timeoutHours - 20));
+        await updateApprovalNodeArrivedAt(managerNode.id, managerArrivedAt.toISOString());
+      }
+    }
   }
 
   console.log('示例数据初始化完成');

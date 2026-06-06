@@ -1,5 +1,5 @@
 import { getDb } from '../db';
-import { Contract, Template, Comment, ApprovalNode, User, ApprovalRole, ApprovalStatus, WarningRule, WarningRecord, WarningLevel, WarningRecordStatus, ContractSummary } from '../types';
+import { Contract, Template, Comment, ApprovalNode, User, ApprovalRole, ApprovalStatus, WarningRule, WarningRecord, WarningLevel, WarningRecordStatus, ContractSummary, ApprovalTimeoutConfig } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function getTemplates(): Promise<Template[]> {
@@ -145,6 +145,9 @@ export async function getApprovalNodes(contractId: string): Promise<ApprovalNode
     userName: r.user_name,
     status: r.status,
     comment: r.comment,
+    arrivedAt: r.arrived_at,
+    processedAt: r.processed_at,
+    processingDurationMs: r.processing_duration_ms,
     createdAt: r.created_at,
     updatedAt: r.updated_at
   }));
@@ -155,24 +158,39 @@ export async function createApprovalNode(data: Omit<ApprovalNode, 'id' | 'create
   const now = new Date().toISOString();
   const db = await getDb();
   await db.run(`
-    INSERT INTO approval_nodes (id, contract_id, role, user_id, user_name, status, comment, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `, id, data.contractId, data.role, data.userId, data.userName, data.status, data.comment || null, now, now);
+    INSERT INTO approval_nodes (id, contract_id, role, user_id, user_name, status, comment, arrived_at, processed_at, processing_duration_ms, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, id, data.contractId, data.role, data.userId, data.userName, data.status, data.comment || null, data.arrivedAt || null, data.processedAt || null, data.processingDurationMs || null, now, now);
   return { ...data, id, createdAt: now, updatedAt: now };
 }
 
 export async function updateApprovalNode(
   id: string,
   status: ApprovalNode['status'],
-  comment?: string
+  comment?: string,
+  processedAt?: string,
+  processingDurationMs?: number
 ): Promise<void> {
   const now = new Date().toISOString();
   const db = await getDb();
   await db.run(`
     UPDATE approval_nodes 
-    SET status = ?, comment = ?, updated_at = ?
+    SET status = ?, comment = ?, processed_at = ?, processing_duration_ms = ?, updated_at = ?
     WHERE id = ?
-  `, status, comment || null, now, id);
+  `, status, comment || null, processedAt || null, processingDurationMs || null, now, id);
+}
+
+export async function updateApprovalNodeArrivedAt(
+  id: string,
+  arrivedAt: string
+): Promise<void> {
+  const now = new Date().toISOString();
+  const db = await getDb();
+  await db.run(`
+    UPDATE approval_nodes 
+    SET arrived_at = ?, updated_at = ?
+    WHERE id = ?
+  `, arrivedAt, now, id);
 }
 
 export async function getUsers(): Promise<User[]> {
@@ -561,4 +579,120 @@ export async function getWarningStats(): Promise<{
     pending: pendingResult?.count || 0,
     byLevel
   };
+}
+
+export async function getApprovalTimeoutConfigs(): Promise<ApprovalTimeoutConfig[]> {
+  const db = await getDb();
+  const rows = await db.all('SELECT * FROM approval_timeout_configs ORDER BY role ASC');
+  return rows.map((r: any) => ({
+    id: r.id,
+    role: r.role,
+    thresholdHours: r.threshold_hours,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  }));
+}
+
+export async function getApprovalTimeoutConfig(role: ApprovalRole): Promise<ApprovalTimeoutConfig | null> {
+  const db = await getDb();
+  const row = await db.get('SELECT * FROM approval_timeout_configs WHERE role = ?', role);
+  if (!row) return null;
+  return {
+    id: row.id,
+    role: row.role,
+    thresholdHours: row.threshold_hours,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+export async function setApprovalTimeoutConfig(role: ApprovalRole, thresholdHours: number): Promise<ApprovalTimeoutConfig> {
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  const db = await getDb();
+
+  const existing = await getApprovalTimeoutConfig(role);
+  if (existing) {
+    await db.run(`
+      UPDATE approval_timeout_configs 
+      SET threshold_hours = ?, updated_at = ?
+      WHERE role = ?
+    `, thresholdHours, now, role);
+  } else {
+    await db.run(`
+      INSERT INTO approval_timeout_configs (id, role, threshold_hours, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+    `, id, role, thresholdHours, now, now);
+  }
+
+  return (await getApprovalTimeoutConfig(role))!;
+}
+
+export async function initDefaultApprovalTimeoutConfigs(): Promise<void> {
+  const existing = await getApprovalTimeoutConfigs();
+  if (existing.length > 0) return;
+
+  const defaultConfigs: Array<{ role: ApprovalRole; thresholdHours: number }> = [
+    { role: 'specialist', thresholdHours: 24 },
+    { role: 'manager', thresholdHours: 24 },
+    { role: 'director', thresholdHours: 24 }
+  ];
+
+  for (const config of defaultConfigs) {
+    await setApprovalTimeoutConfig(config.role, config.thresholdHours);
+  }
+}
+
+export async function getProcessedApprovalNodes(): Promise<ApprovalNode[]> {
+  const db = await getDb();
+  const rows = await db.all(`
+    SELECT * FROM approval_nodes 
+    WHERE status IN ('approved', 'rejected')
+      AND processing_duration_ms IS NOT NULL
+    ORDER BY updated_at DESC
+  `);
+  return rows.map((r: any) => ({
+    id: r.id,
+    contractId: r.contract_id,
+    role: r.role,
+    userId: r.user_id,
+    userName: r.user_name,
+    status: r.status,
+    comment: r.comment,
+    arrivedAt: r.arrived_at,
+    processedAt: r.processed_at,
+    processingDurationMs: r.processing_duration_ms,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  }));
+}
+
+export async function getPendingApprovalNodesWithContracts(): Promise<Array<ApprovalNode & { contractTitle: string; riskScore: number; submittedAt: string }>> {
+  const db = await getDb();
+  const rows = await db.all(`
+    SELECT an.*, c.title as contract_title, c.risk_score, c.created_at as submitted_at
+    FROM approval_nodes an
+    JOIN contracts c ON an.contract_id = c.id
+    WHERE an.status = 'pending'
+      AND an.arrived_at IS NOT NULL
+      AND c.status = 'pending'
+    ORDER BY an.arrived_at ASC
+  `);
+  return rows.map((r: any) => ({
+    id: r.id,
+    contractId: r.contract_id,
+    role: r.role,
+    userId: r.user_id,
+    userName: r.user_name,
+    status: r.status,
+    comment: r.comment,
+    arrivedAt: r.arrived_at,
+    processedAt: r.processed_at,
+    processingDurationMs: r.processing_duration_ms,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    contractTitle: r.contract_title,
+    riskScore: r.risk_score,
+    submittedAt: r.submitted_at
+  }));
 }

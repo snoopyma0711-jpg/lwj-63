@@ -1,12 +1,16 @@
 import { Server as HTTPServer } from 'http';
 import { Server, Socket } from 'socket.io';
-import { Comment, Contract, ApprovalNode, WarningRecord, WarningStats, RiskScoreDetail } from './types';
+import { Comment, Contract, ApprovalNode, WarningRecord, WarningStats, RiskScoreDetail, ApprovalEfficiencyStats } from './types';
+import { getApprovalEfficiencyStats } from './services/approvalEfficiencyService';
 
 let io: Server;
 
 const contractRooms = new Map<string, Set<string>>();
 const warningRoom = 'warning:dashboard';
 const riskRankingRoom = 'risk:ranking';
+const efficiencyRoom = 'efficiency:dashboard';
+
+let efficiencyStatsInterval: NodeJS.Timeout | null = null;
 
 export function initWebSocket(server: HTTPServer): void {
   io = new Server(server, {
@@ -52,6 +56,16 @@ export function initWebSocket(server: HTTPServer): void {
     socket.on('leave:risk-ranking', () => {
       socket.leave(riskRankingRoom);
       console.log(`Socket ${socket.id} left risk ranking`);
+    });
+
+    socket.on('join:efficiency', () => {
+      socket.join(efficiencyRoom);
+      console.log(`Socket ${socket.id} joined efficiency dashboard`);
+    });
+
+    socket.on('leave:efficiency', () => {
+      socket.leave(efficiencyRoom);
+      console.log(`Socket ${socket.id} left efficiency dashboard`);
     });
 
     socket.on('disconnect', () => {
@@ -103,5 +117,38 @@ export function broadcastRiskScoreUpdate(contractId: string, data: {
   if (io) {
     io.to(`contract:${contractId}`).emit('risk:score-update', data);
     io.to('risk:ranking').emit('risk:ranking-update');
+  }
+}
+
+export function broadcastApprovalEfficiencyUpdate(stats: ApprovalEfficiencyStats): void {
+  if (io) {
+    io.to(efficiencyRoom).emit('efficiency:update', stats);
+  }
+}
+
+export async function broadcastEfficiencyStats(): Promise<void> {
+  try {
+    const stats = await getApprovalEfficiencyStats();
+    broadcastApprovalEfficiencyUpdate(stats);
+  } catch (error) {
+    console.error('Failed to broadcast efficiency stats:', error);
+  }
+}
+
+export function startEfficiencyStatsScheduler(): void {
+  if (efficiencyStatsInterval) {
+    clearInterval(efficiencyStatsInterval);
+  }
+  efficiencyStatsInterval = setInterval(() => {
+    broadcastEfficiencyStats();
+  }, 10000);
+
+  broadcastEfficiencyStats();
+}
+
+export function stopEfficiencyStatsScheduler(): void {
+  if (efficiencyStatsInterval) {
+    clearInterval(efficiencyStatsInterval);
+    efficiencyStatsInterval = null;
   }
 }
