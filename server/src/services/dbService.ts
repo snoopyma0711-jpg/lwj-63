@@ -169,15 +169,17 @@ export async function updateApprovalNode(
   status: ApprovalNode['status'],
   comment?: string,
   processedAt?: string,
-  processingDurationMs?: number
+  processingDurationMs?: number,
+  userId?: string,
+  userName?: string
 ): Promise<void> {
   const now = new Date().toISOString();
   const db = await getDb();
   await db.run(`
     UPDATE approval_nodes 
-    SET status = ?, comment = ?, processed_at = ?, processing_duration_ms = ?, updated_at = ?
+    SET status = ?, comment = ?, processed_at = ?, processing_duration_ms = ?, user_id = ?, user_name = ?, updated_at = ?
     WHERE id = ?
-  `, status, comment || null, processedAt || null, processingDurationMs || null, now, id);
+  `, status, comment || null, processedAt || null, processingDurationMs || null, userId || null, userName || null, now, id);
 }
 
 export async function updateApprovalNodeArrivedAt(
@@ -201,6 +203,13 @@ export async function getUsers(): Promise<User[]> {
     name: r.name,
     role: r.role
   }));
+}
+
+export async function getUserByRole(role: ApprovalRole): Promise<User | null> {
+  const db = await getDb();
+  const row = await db.get('SELECT * FROM users WHERE role = ? LIMIT 1', role);
+  if (!row) return null;
+  return { id: row.id, name: row.name, role: row.role };
 }
 
 export async function getUser(id: string): Promise<User | null> {

@@ -8,7 +8,8 @@ import {
   getComments,
   updateApprovalNodeArrivedAt,
   getApprovalTimeoutConfig,
-  getApprovalTimeoutConfigs
+  getApprovalTimeoutConfigs,
+  getUserByRole
 } from './dbService';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -27,11 +28,15 @@ export async function startApproval(contractId: string, userId: string, userName
   const nodes: ApprovalNode[] = [];
   const now = new Date().toISOString();
 
+  const specialistUser = await getUserByRole('specialist');
+  const managerUser = await getUserByRole('manager');
+  const directorUser = hasHighRisk ? await getUserByRole('director') : null;
+
   const specialistNode = await createApprovalNode({
     contractId,
     role: 'specialist',
-    userId,
-    userName,
+    userId: specialistUser?.id || userId,
+    userName: specialistUser?.name || userName,
     status: 'pending',
     arrivedAt: now
   });
@@ -40,17 +45,17 @@ export async function startApproval(contractId: string, userId: string, userName
   nodes.push(await createApprovalNode({
     contractId,
     role: 'manager',
-    userId,
-    userName,
+    userId: managerUser?.id || '',
+    userName: managerUser?.name || '',
     status: 'pending'
   }));
 
-  if (hasHighRisk) {
+  if (hasHighRisk && directorUser) {
     nodes.push(await createApprovalNode({
       contractId,
       role: 'director',
-      userId,
-      userName,
+      userId: directorUser.id,
+      userName: directorUser.name,
       status: 'pending'
     }));
   }
@@ -84,15 +89,15 @@ export async function processApproval(
     processingDurationMs = new Date(processedAt).getTime() - new Date(currentNode.arrivedAt).getTime();
   }
 
-  await updateApprovalNode(currentNode.id, nodeStatus, comment, processedAt, processingDurationMs);
+  await updateApprovalNode(currentNode.id, nodeStatus, comment, processedAt, processingDurationMs, userId, userName);
 
   if (action === 'reject') {
     await updateContractStatus(contractId, 'rejected', null, contract.hasHighRisk);
-    return { contract: (await getContract(contractId))!, node: { ...currentNode, status: nodeStatus, processedAt, processingDurationMs } };
+    return { contract: (await getContract(contractId))!, node: { ...currentNode, status: nodeStatus, processedAt, processingDurationMs, userId, userName } };
   }
 
   if (action === 'transfer') {
-    return { contract: (await getContract(contractId))!, node: { ...currentNode, status: nodeStatus, processedAt, processingDurationMs } };
+    return { contract: (await getContract(contractId))!, node: { ...currentNode, status: nodeStatus, processedAt, processingDurationMs, userId, userName } };
   }
 
   const roleOrder: ApprovalRole[] = contract.hasHighRisk
@@ -113,7 +118,7 @@ export async function processApproval(
     await updateContractStatus(contractId, 'approved', null, contract.hasHighRisk);
   }
 
-  return { contract: (await getContract(contractId))!, node: { ...currentNode, status: nodeStatus, processedAt, processingDurationMs } };
+  return { contract: (await getContract(contractId))!, node: { ...currentNode, status: nodeStatus, processedAt, processingDurationMs, userId, userName } };
 }
 
 export async function getApprovalChainStatus(contractId: string): Promise<{

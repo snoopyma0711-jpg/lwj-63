@@ -25,16 +25,41 @@ export async function getApprovalEfficiencyStats(): Promise<ApprovalEfficiencySt
 
   const byRole = calculateRoleStats(processedNodes, nodesWithTimeout, timeoutConfigMap);
 
-  const timedOutContracts = nodesWithTimeout
-    .filter(n => n.isTimedOut)
-    .map(n => ({
-      contractId: n.contractId,
-      contractTitle: (n as any).contractTitle as string,
-      currentRole: n.role,
-      timeoutDurationMs: n.currentDurationMs,
-      submittedAt: (n as any).submittedAt as string,
-      riskScore: (n as any).riskScore as number
-    }))
+  const timedOutNodes = nodesWithTimeout.filter(n => n.isTimedOut);
+  
+  const contractTimeoutMap = new Map<string, {
+    contractId: string;
+    contractTitle: string;
+    currentRole: ApprovalRole;
+    timeoutDurationMs: number;
+    submittedAt: string;
+    riskScore: number;
+    timedOutRoles: ApprovalRole[];
+  }>();
+
+  for (const node of timedOutNodes) {
+    const contractId = node.contractId;
+    const existing = contractTimeoutMap.get(contractId);
+    const timeoutDurationMs = node.currentDurationMs || 0;
+    
+    if (!existing || timeoutDurationMs > existing.timeoutDurationMs) {
+      const timedOutRoles = timedOutNodes
+        .filter(n => n.contractId === contractId)
+        .map(n => n.role);
+      
+      contractTimeoutMap.set(contractId, {
+        contractId,
+        contractTitle: (node as any).contractTitle as string,
+        currentRole: node.role,
+        timeoutDurationMs,
+        submittedAt: (node as any).submittedAt as string,
+        riskScore: (node as any).riskScore as number,
+        timedOutRoles
+      });
+    }
+  }
+
+  const timedOutContracts = Array.from(contractTimeoutMap.values())
     .sort((a, b) => b.timeoutDurationMs - a.timeoutDurationMs);
 
   const weeklyStats = calculateWeeklyStats(processedNodes);

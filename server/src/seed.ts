@@ -1,5 +1,5 @@
 import { getDb } from './db';
-import { createTemplate, createUser, getUser, createContract, updateContractStatus, createApprovalNode, updateApprovalNodeArrivedAt } from './services/dbService';
+import { createTemplate, createUser, getUser, createContract, updateContractStatus, createApprovalNode, updateApprovalNodeArrivedAt, updateApprovalNode } from './services/dbService';
 import { startApproval } from './services/approvalService';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -197,6 +197,22 @@ ${sample.title} 相关服务内容。
     }
 
     if (sample.timeoutHours > 24) {
+      const specialistNode = nodes.find(n => n.role === 'specialist');
+      if (specialistNode) {
+        const specialistProcessedAt = new Date(arrivedAt);
+        specialistProcessedAt.setHours(specialistProcessedAt.getHours() + 20);
+        const specialistDurationMs = specialistProcessedAt.getTime() - new Date(arrivedAt).getTime();
+        await updateApprovalNode(
+          specialistNode.id,
+          'approved',
+          '审核通过',
+          specialistProcessedAt.toISOString(),
+          specialistDurationMs,
+          specialist.id,
+          specialist.name
+        );
+      }
+
       await updateContractStatus(contract.id, 'pending', 'manager', sample.hasHighRisk);
       const managerNode = nodes.find(n => n.role === 'manager');
       if (managerNode) {

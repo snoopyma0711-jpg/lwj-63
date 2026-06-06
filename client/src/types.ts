@@ -186,6 +186,7 @@ export interface ApprovalEfficiencyStats {
     timeoutDurationMs: number;
     submittedAt: string;
     riskScore: number;
+    timedOutRoles: ApprovalRole[];
   }>;
   weeklyStats: {
     totalProcessed: number;

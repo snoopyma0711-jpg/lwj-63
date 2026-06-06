@@ -309,8 +309,12 @@ export default function ApprovalEfficiency() {
                             已超时 {formatDurationShort(contract.timeoutDurationMs)}
                           </span>
                         </div>
-                        <div className="mt-2 flex items-center space-x-3 text-sm text-gray-500">
+                        <div className="mt-2 flex items-center space-x-3 text-sm text-gray-500 flex-wrap gap-y-1">
                           <span>当前审批：{roleNames[contract.currentRole]}</span>
+                          <span>•</span>
+                          <span>
+                            超时节点：{contract.timedOutRoles.map(r => roleNames[r]).join('、')}
+                          </span>
                           <span>•</span>
                           <span>提交时间：{new Date(contract.submittedAt).toLocaleDateString('zh-CN')}</span>
                         </div>

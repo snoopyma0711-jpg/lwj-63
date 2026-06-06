@@ -191,6 +191,11 @@ export default function ApprovalFlow({ contract, nodes, nodesWithTimeout, hasTim
                     }`}>
                       {roleNames[role]}
                     </p>
+                    {node && node.userName && (
+                      <p className="text-xs text-gray-500">
+                        {node.userName}
+                      </p>
+                    )}
                     <p className={`text-xs ${
                       node ? statusConfig[node.status].color : 'text-gray-400'
                     }`}>
