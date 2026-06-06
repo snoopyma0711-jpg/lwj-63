@@ -46,6 +46,7 @@ export default function ContractUpload() {
   const [selectedTemplate, setSelectedTemplate] = useState('');
   const [title, setTitle] = useState('');
   const [rawContent, setRawContent] = useState('');
+  const [expiryDate, setExpiryDate] = useState('');
   const [loading, setLoading] = useState(false);
   const [comparing, setComparing] = useState(false);
   const [previewDiffs, setPreviewDiffs] = useState<any[] | null>(null);
@@ -78,6 +79,9 @@ export default function ContractUpload() {
       setTitle(`${contract.title}（修订版）`);
       setSelectedTemplate(contract.templateId);
       setRawContent(contract.rawContent);
+      if (contract.expiryDate) {
+        setExpiryDate(contract.expiryDate);
+      }
     } catch (error) {
       console.error('加载原始合同失败:', error);
     }
@@ -115,7 +119,8 @@ export default function ContractUpload() {
         rawContent,
         submittedBy: user.id,
         submittedByName: user.name,
-        parentId
+        parentId,
+        expiryDate: expiryDate || undefined
       });
       navigate(`/contract/${contract.id}`);
     } catch (error) {
@@ -157,6 +162,18 @@ export default function ContractUpload() {
               value={title}
               onChange={e => setTitle(e.target.value)}
               placeholder="请输入合同标题"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+            />
+          </div>
+
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              到期日期 <span className="text-gray-400 font-normal">(可选，用于到期预警)</span>
+            </label>
+            <input
+              type="date"
+              value={expiryDate}
+              onChange={e => setExpiryDate(e.target.value)}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
             />
           </div>

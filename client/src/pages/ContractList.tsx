@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { contractApi } from '../services/api';
-import { Contract } from '../types';
+import { contractApi, warningRecordApi } from '../services/api';
+import { Contract, WarningRecord } from '../types';
 
 const statusConfig: Record<string, { label: string; color: string; bg: string }> = {
   draft: { label: '草稿', color: 'text-gray-600', bg: 'bg-gray-100' },
@@ -19,6 +19,7 @@ const roleNames: Record<string, string> = {
 
 export default function ContractList() {
   const [contracts, setContracts] = useState<Contract[]>([]);
+  const [warningRecords, setWarningRecords] = useState<WarningRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('all');
 
@@ -28,13 +29,30 @@ export default function ContractList() {
 
   async function loadContracts() {
     try {
-      const data = await contractApi.list();
-      setContracts(data);
+      const [contractsData, warningsData] = await Promise.all([
+        contractApi.list(),
+        warningRecordApi.list({ status: 'pending' })
+      ]);
+      setContracts(contractsData);
+      setWarningRecords(warningsData);
     } catch (error) {
       console.error('加载合同列表失败:', error);
     } finally {
       setLoading(false);
     }
+  }
+
+  function getDaysRemaining(expiryDate?: string): number | null {
+    if (!expiryDate) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const expiry = new Date(expiryDate);
+    expiry.setHours(0, 0, 0, 0);
+    return Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  }
+
+  function getWarningForContract(contractId: string): WarningRecord | undefined {
+    return warningRecords.find(w => w.contractId === contractId);
   }
 
   const filteredContracts = filter === 'all'
@@ -124,7 +142,7 @@ export default function ContractList() {
               >
                 <div className="flex items-center justify-between">
                   <div className="flex-1">
-                    <div className="flex items-center space-x-3">
+                    <div className="flex items-center space-x-3 flex-wrap">
                       <h3 className="font-medium text-gray-900">{contract.title}</h3>
                       <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${statusConfig[contract.status]?.bg} ${statusConfig[contract.status]?.color}`}>
                         {statusConfig[contract.status]?.label}
@@ -134,15 +152,37 @@ export default function ContractList() {
                           ⚠️ 高风险
                         </span>
                       )}
+                      {getWarningForContract(contract.id) && (
+                        <span
+                          className="px-2.5 py-0.5 rounded-full text-xs font-medium animate-pulse"
+                          style={{
+                            backgroundColor: `${getWarningForContract(contract.id)!.warningColor}20`,
+                            color: getWarningForContract(contract.id)!.warningColor
+                          }}
+                        >
+                          ⚠️ {getDaysRemaining(contract.expiryDate)}天后到期
+                        </span>
+                      )}
                       <span className="text-xs text-gray-400">v{contract.version}</span>
                     </div>
-                    <div className="mt-2 flex items-center space-x-4 text-sm text-gray-500">
+                    <div className="mt-2 flex items-center space-x-4 text-sm text-gray-500 flex-wrap">
                       <span>提交人：{contract.submittedByName}</span>
-                      <span>•</span>
-                      {contract.currentApproverRole && (
-                        <span>当前审批：{roleNames[contract.currentApproverRole]}</span>
+                      {contract.expiryDate && (
+                        <>
+                          <span>•</span>
+                          <span className={getDaysRemaining(contract.expiryDate)! <= 7 ? 'text-red-600 font-medium' : ''}>
+                            到期：{new Date(contract.expiryDate).toLocaleDateString('zh-CN')}
+                            {getDaysRemaining(contract.expiryDate)! >= 0 && ` (剩余${getDaysRemaining(contract.expiryDate)}天)`}
+                          </span>
+                        </>
                       )}
                       <span>•</span>
+                      {contract.currentApproverRole && (
+                        <>
+                          <span>当前审批：{roleNames[contract.currentApproverRole]}</span>
+                          <span>•</span>
+                        </>
+                      )}
                       <span>{new Date(contract.updatedAt).toLocaleString('zh-CN')}</span>
                     </div>
                   </div>

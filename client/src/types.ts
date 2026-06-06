@@ -63,8 +63,47 @@ export interface Contract {
   submittedByName: string;
   currentApproverRole: ApprovalRole | null;
   hasHighRisk: boolean;
+  expiryDate?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export type WarningLevel = 'yellow' | 'orange' | 'red';
+
+export interface WarningRule {
+  id: string;
+  days: number;
+  level: WarningLevel;
+  color: string;
+  createdAt: string;
+}
+
+export type WarningRecordStatus = 'pending' | 'handled' | 'renewed' | 'terminated';
+
+export interface WarningRecord {
+  id: string;
+  contractId: string;
+  contractTitle: string;
+  expiryDate: string;
+  daysRemaining: number;
+  warningLevel: WarningLevel;
+  warningColor: string;
+  status: WarningRecordStatus;
+  renewedContractId?: string;
+  handledBy?: string;
+  handledAt?: string;
+  createdAt: string;
+}
+
+export interface WarningStats {
+  thisMonthExpiring: number;
+  handled: number;
+  pending: number;
+  byLevel: {
+    yellow: number;
+    orange: number;
+    red: number;
+  };
 }
 
 export interface Template {

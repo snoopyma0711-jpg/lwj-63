@@ -12,11 +12,18 @@ import {
   getApprovalNodes,
   getContractVersionChain,
   getUsers,
-  createUser
+  createUser,
+  getWarningRules,
+  createWarningRule,
+  deleteWarningRule,
+  getWarningRecords,
+  updateWarningRecordStatus,
+  getWarningStats,
+  updateContractExpiryDate
 } from './services/dbService';
 import { startApproval, processApproval, getApprovalChainStatus } from './services/approvalService';
-import { broadcastComment, broadcastApprovalUpdate, broadcastStatusUpdate } from './websocket';
-import { RiskLevel, ApprovalRole } from './types';
+import { broadcastComment, broadcastApprovalUpdate, broadcastStatusUpdate, broadcastWarningStatsUpdate, broadcastWarningRecordUpdate } from './websocket';
+import { RiskLevel, ApprovalRole, WarningLevel, WarningRecordStatus } from './types';
 
 const router = Router();
 
@@ -146,6 +153,93 @@ router.post('/users', async (req: Request, res: Response) => {
   const { name, role } = req.body;
   const user = await createUser(name, role as ApprovalRole);
   res.json(user);
+});
+
+router.get('/warning-rules', async (req: Request, res: Response) => {
+  const rules = await getWarningRules();
+  res.json(rules);
+});
+
+router.post('/warning-rules', async (req: Request, res: Response) => {
+  const { days, level, color } = req.body;
+  const rule = await createWarningRule(days, level as WarningLevel, color);
+  res.json(rule);
+});
+
+router.delete('/warning-rules/:id', async (req: Request, res: Response) => {
+  await deleteWarningRule(req.params.id);
+  res.json({ success: true });
+});
+
+router.get('/warning-records', async (req: Request, res: Response) => {
+  const { status, level } = req.query;
+  const filters: { status?: WarningRecordStatus; level?: WarningLevel } = {};
+  if (status) filters.status = status as WarningRecordStatus;
+  if (level) filters.level = level as WarningLevel;
+  const records = await getWarningRecords(filters);
+  res.json(records);
+});
+
+router.post('/warning-records/:id/handle', async (req: Request, res: Response) => {
+  const { action, userId } = req.body;
+  let status: WarningRecordStatus;
+
+  if (action === 'handled') {
+    status = 'handled';
+  } else if (action === 'terminate') {
+    status = 'terminated';
+  } else {
+    return res.status(400).json({ error: '无效的操作' });
+  }
+
+  await updateWarningRecordStatus(req.params.id, status, userId);
+  const records = await getWarningRecords();
+  const stats = await getWarningStats();
+  broadcastWarningRecordUpdate(records);
+  broadcastWarningStatsUpdate(stats);
+  res.json({ success: true });
+});
+
+router.post('/warning-records/:id/renew', async (req: Request, res: Response) => {
+  const { userId, userName } = req.body;
+
+  const records = await getWarningRecords();
+  const record = records.find(r => r.id === req.params.id);
+  if (!record) return res.status(404).json({ error: '预警记录不存在' });
+
+  const originalContract = await getContract(record.contractId);
+  if (!originalContract) return res.status(404).json({ error: '原合同不存在' });
+
+  const newContract = await createContract({
+    title: `${originalContract.title} (续签)`,
+    templateId: originalContract.templateId,
+    rawContent: originalContract.rawContent,
+    submittedBy: userId,
+    submittedByName: userName,
+    parentId: originalContract.id,
+    expiryDate: originalContract.expiryDate
+  });
+
+  await updateWarningRecordStatus(req.params.id, 'renewed', userId, newContract.id);
+
+  const updatedRecords = await getWarningRecords();
+  const stats = await getWarningStats();
+  broadcastWarningRecordUpdate(updatedRecords);
+  broadcastWarningStatsUpdate(stats);
+
+  res.json({ success: true, contract: newContract });
+});
+
+router.get('/warning-stats', async (req: Request, res: Response) => {
+  const stats = await getWarningStats();
+  res.json(stats);
+});
+
+router.put('/contracts/:id/expiry', async (req: Request, res: Response) => {
+  const { expiryDate } = req.body;
+  await updateContractExpiryDate(req.params.id, expiryDate);
+  const contract = await getContract(req.params.id);
+  res.json(contract);
 });
 
 export default router;

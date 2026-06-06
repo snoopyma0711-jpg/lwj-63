@@ -4,6 +4,8 @@ import http from 'http';
 import routes from './routes';
 import { initWebSocket } from './websocket';
 import { seedData } from './seed';
+import { initDefaultWarningRules } from './services/dbService';
+import { startWarningScanScheduler } from './services/warningScanService';
 
 const app = express();
 const server = http.createServer(app);
@@ -22,6 +24,8 @@ initWebSocket(server);
 
 async function start() {
   await seedData();
+  await initDefaultWarningRules();
+  startWarningScanScheduler();
   server.listen(PORT, () => {
     console.log(`服务器运行在 http://localhost:${PORT}`);
     console.log(`WebSocket 已启动`);

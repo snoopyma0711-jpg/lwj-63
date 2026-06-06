@@ -1,5 +1,5 @@
 import { getDb } from './db';
-import { createTemplate, createUser, getUser } from './services/dbService';
+import { createTemplate, createUser, getUser, createContract, updateContractStatus } from './services/dbService';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function seedData(): Promise<void> {
@@ -67,8 +67,8 @@ export async function seedData(): Promise<void> {
     }
   ];
 
-  await createTemplate('标准服务合同模板', templateClauses);
-  await createTemplate('标准采购合同模板', [
+  const serviceTemplate = await createTemplate('标准服务合同模板', templateClauses);
+  const purchaseTemplate = await createTemplate('标准采购合同模板', [
     {
       id: uuidv4(),
       number: '1',
@@ -88,6 +88,58 @@ export async function seedData(): Promise<void> {
       content: '乙方应在[日期]前将货物送至甲方指定地点。'
     }
   ]);
+
+  function addDays(days: number): string {
+    const date = new Date();
+    date.setDate(date.getDate() + days);
+    return date.toISOString().split('T')[0];
+  }
+
+  const sampleContracts = [
+    { title: '2024年度技术咨询服务合同', expiryDays: 5, templateId: serviceTemplate.id },
+    { title: '供应商框架合作协议', expiryDays: 25, templateId: serviceTemplate.id },
+    { title: '软件开发服务合同', expiryDays: 45, templateId: serviceTemplate.id },
+    { title: '办公设备采购合同', expiryDays: 15, templateId: purchaseTemplate.id },
+    { title: '云服务购买协议', expiryDays: 70, templateId: serviceTemplate.id },
+    { title: '人力资源外包合同', expiryDays: 3, templateId: serviceTemplate.id }
+  ];
+
+  for (const sample of sampleContracts) {
+    const content = `
+第一条 合同双方
+甲方：示例科技有限公司
+乙方：供应商公司
+
+第二条 服务内容
+${sample.title} 相关服务内容。
+
+第三条 合同期限
+本合同自签订之日起生效，至${addDays(sample.expiryDays)}止。
+
+第四条 费用及支付
+合同总金额：人民币100,000元整。
+
+第五条 保密条款
+双方应对合作过程中知悉的商业秘密承担保密义务。
+
+第六条 违约责任
+任何一方违反合同约定，应承担相应的违约责任。
+
+第七条 争议解决
+协商不成的，向甲方所在地人民法院提起诉讼。
+    `.trim();
+
+    const contract = await createContract({
+      title: sample.title,
+      templateId: sample.templateId,
+      rawContent: content,
+      submittedBy: specialist.id,
+      submittedByName: specialist.name,
+      expiryDate: addDays(sample.expiryDays)
+    });
+
+    await updateContractStatus(contract.id, 'approved', null, false);
+  }
 
   console.log('示例数据初始化完成');
   console.log('用户账号：', { specialist, manager, director });

@@ -1,5 +1,5 @@
 import { getDb } from '../db';
-import { Contract, Template, Comment, ApprovalNode, User, ApprovalRole, ApprovalStatus } from '../types';
+import { Contract, Template, Comment, ApprovalNode, User, ApprovalRole, ApprovalStatus, WarningRule, WarningRecord, WarningLevel, WarningRecordStatus } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function getTemplates(): Promise<Template[]> {
@@ -66,6 +66,7 @@ export async function createContract(data: {
   submittedBy: string;
   submittedByName: string;
   parentId?: string;
+  expiryDate?: string;
 }): Promise<Contract> {
   const id = uuidv4();
   const now = new Date().toISOString();
@@ -76,10 +77,10 @@ export async function createContract(data: {
   await db.run(`
     INSERT INTO contracts (id, version, parent_id, title, template_id, raw_content, 
       status, submitted_by, submitted_by_name, current_approver_role, has_high_risk, 
-      created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, NULL, 0, ?, ?)
+      expiry_date, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, NULL, 0, ?, ?, ?)
   `, id, version, data.parentId || null, data.title, data.templateId, data.rawContent,
-    data.submittedBy, data.submittedByName, now, now);
+    data.submittedBy, data.submittedByName, data.expiryDate || null, now, now);
 
   return getContract(id) as Promise<Contract>;
 }
@@ -211,7 +212,221 @@ function rowToContract(row: any): Contract {
     submittedByName: row.submitted_by_name,
     currentApproverRole: row.current_approver_role,
     hasHighRisk: row.has_high_risk === 1,
+    expiryDate: row.expiry_date || undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+export async function updateContractExpiryDate(id: string, expiryDate: string): Promise<void> {
+  const now = new Date().toISOString();
+  const db = await getDb();
+  await db.run(`
+    UPDATE contracts 
+    SET expiry_date = ?, updated_at = ?
+    WHERE id = ?
+  `, expiryDate, now, id);
+}
+
+export async function getApprovedContractsWithExpiry(): Promise<Contract[]> {
+  const db = await getDb();
+  const rows = await db.all(`
+    SELECT * FROM contracts 
+    WHERE status = 'approved' AND expiry_date IS NOT NULL
+    ORDER BY expiry_date ASC
+  `);
+  return rows.map(rowToContract);
+}
+
+export async function getWarningRules(): Promise<WarningRule[]> {
+  const db = await getDb();
+  const rows = await db.all('SELECT * FROM warning_rules ORDER BY days DESC');
+  return rows.map((r: any) => ({
+    id: r.id,
+    days: r.days,
+    level: r.level,
+    color: r.color,
+    createdAt: r.created_at
+  }));
+}
+
+export async function createWarningRule(days: number, level: WarningLevel, color: string): Promise<WarningRule> {
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  const db = await getDb();
+  await db.run(`
+    INSERT INTO warning_rules (id, days, level, color, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `, id, days, level, color, now);
+  return { id, days, level, color, createdAt: now };
+}
+
+export async function deleteWarningRule(id: string): Promise<void> {
+  const db = await getDb();
+  await db.run('DELETE FROM warning_rules WHERE id = ?', id);
+}
+
+export async function initDefaultWarningRules(): Promise<void> {
+  const existing = await getWarningRules();
+  if (existing.length > 0) return;
+
+  const defaultRules = [
+    { days: 60, level: 'yellow' as WarningLevel, color: '#fbbf24' },
+    { days: 30, level: 'orange' as WarningLevel, color: '#f97316' },
+    { days: 7, level: 'red' as WarningLevel, color: '#ef4444' }
+  ];
+
+  for (const rule of defaultRules) {
+    await createWarningRule(rule.days, rule.level, rule.color);
+  }
+}
+
+export async function getWarningRecords(filters?: {
+  status?: WarningRecordStatus;
+  level?: WarningLevel;
+}): Promise<WarningRecord[]> {
+  const db = await getDb();
+  let query = 'SELECT * FROM warning_records WHERE 1=1';
+  const params: any[] = [];
+
+  if (filters?.status) {
+    query += ' AND status = ?';
+    params.push(filters.status);
+  }
+  if (filters?.level) {
+    query += ' AND warning_level = ?';
+    params.push(filters.level);
+  }
+
+  query += ' ORDER BY days_remaining ASC, created_at DESC';
+  const rows = await db.all(query, ...params);
+
+  return rows.map((r: any) => ({
+    id: r.id,
+    contractId: r.contract_id,
+    contractTitle: r.contract_title,
+    expiryDate: r.expiry_date,
+    daysRemaining: r.days_remaining,
+    warningLevel: r.warning_level,
+    warningColor: r.warning_color,
+    status: r.status,
+    renewedContractId: r.renewed_contract_id || undefined,
+    handledBy: r.handled_by || undefined,
+    handledAt: r.handled_at || undefined,
+    createdAt: r.created_at
+  }));
+}
+
+export async function getWarningRecordByContractAndLevel(
+  contractId: string,
+  warningLevel: WarningLevel
+): Promise<WarningRecord | null> {
+  const db = await getDb();
+  const row = await db.get(`
+    SELECT * FROM warning_records 
+    WHERE contract_id = ? AND warning_level = ? AND status = 'pending'
+  `, contractId, warningLevel);
+  if (!row) return null;
+  return {
+    id: row.id,
+    contractId: row.contract_id,
+    contractTitle: row.contract_title,
+    expiryDate: row.expiry_date,
+    daysRemaining: row.days_remaining,
+    warningLevel: row.warning_level,
+    warningColor: row.warning_color,
+    status: row.status,
+    renewedContractId: row.renewed_contract_id || undefined,
+    handledBy: row.handled_by || undefined,
+    handledAt: row.handled_at || undefined,
+    createdAt: row.created_at
+  };
+}
+
+export async function createWarningRecord(data: {
+  contractId: string;
+  contractTitle: string;
+  expiryDate: string;
+  daysRemaining: number;
+  warningLevel: WarningLevel;
+  warningColor: string;
+}): Promise<WarningRecord> {
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  const db = await getDb();
+  await db.run(`
+    INSERT INTO warning_records (
+      id, contract_id, contract_title, expiry_date, days_remaining,
+      warning_level, warning_color, status, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+  `, id, data.contractId, data.contractTitle, data.expiryDate, data.daysRemaining,
+    data.warningLevel, data.warningColor, now);
+
+  return {
+    id,
+    ...data,
+    status: 'pending' as WarningRecordStatus,
+    createdAt: now
+  };
+}
+
+export async function updateWarningRecordStatus(
+  id: string,
+  status: WarningRecordStatus,
+  handledBy?: string,
+  renewedContractId?: string
+): Promise<void> {
+  const now = new Date().toISOString();
+  const db = await getDb();
+  await db.run(`
+    UPDATE warning_records 
+    SET status = ?, handled_by = ?, handled_at = ?, renewed_contract_id = ?
+    WHERE id = ?
+  `, status, handledBy || null, now, renewedContractId || null, id);
+}
+
+export async function getWarningStats(): Promise<{
+  thisMonthExpiring: number;
+  handled: number;
+  pending: number;
+  byLevel: { yellow: number; orange: number; red: number };
+}> {
+  const db = await getDb();
+
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+
+  const thisMonthResult = await db.get(`
+    SELECT COUNT(*) as count FROM warning_records
+    WHERE expiry_date >= ? AND expiry_date <= ?
+  `, monthStart, monthEnd);
+
+  const handledResult = await db.get(`
+    SELECT COUNT(*) as count FROM warning_records
+    WHERE status IN ('handled', 'renewed', 'terminated')
+  `);
+
+  const pendingResult = await db.get(`
+    SELECT COUNT(*) as count FROM warning_records
+    WHERE status = 'pending'
+  `);
+
+  const byLevelResult = await db.all(`
+    SELECT warning_level, COUNT(*) as count FROM warning_records
+    WHERE status = 'pending'
+    GROUP BY warning_level
+  `);
+
+  const byLevel = { yellow: 0, orange: 0, red: 0 };
+  for (const row of byLevelResult) {
+    (byLevel as any)[row.warning_level] = row.count;
+  }
+
+  return {
+    thisMonthExpiring: thisMonthResult?.count || 0,
+    handled: handledResult?.count || 0,
+    pending: pendingResult?.count || 0,
+    byLevel
   };
 }

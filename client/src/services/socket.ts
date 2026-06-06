@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { Comment, Contract, ApprovalNode } from '../types';
+import { Comment, Contract, ApprovalNode, WarningRecord, WarningStats } from '../types';
 
 let socket: Socket | null = null;
 
@@ -65,5 +65,41 @@ export function offApprovalUpdate(callback: (data: { contract: Contract; node?: 
 export function offContractStatus(callback: (contract: Contract) => void): void {
   if (socket) {
     socket.off('contract:status', callback);
+  }
+}
+
+export function joinWarning(): void {
+  if (socket) {
+    socket.emit('join:warning');
+  }
+}
+
+export function leaveWarning(): void {
+  if (socket) {
+    socket.emit('leave:warning');
+  }
+}
+
+export function onWarningStats(callback: (stats: WarningStats) => void): void {
+  if (socket) {
+    socket.on('warning:stats', callback);
+  }
+}
+
+export function onWarningRecords(callback: (records: WarningRecord[]) => void): void {
+  if (socket) {
+    socket.on('warning:records', callback);
+  }
+}
+
+export function offWarningStats(callback: (stats: WarningStats) => void): void {
+  if (socket) {
+    socket.off('warning:stats', callback);
+  }
+}
+
+export function offWarningRecords(callback: (records: WarningRecord[]) => void): void {
+  if (socket) {
+    socket.off('warning:records', callback);
   }
 }
