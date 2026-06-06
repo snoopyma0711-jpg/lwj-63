@@ -69,9 +69,8 @@ export async function createContract(data: {
 }): Promise<Contract> {
   const id = uuidv4();
   const now = new Date().toISOString();
-  const version = data.parentId
-    ? (await getContract(data.parentId))?.version || 0 + 1
-    : 1;
+  const parentContract = data.parentId ? await getContract(data.parentId) : null;
+  const version = parentContract ? parentContract.version + 1 : 1;
 
   const db = await getDb();
   await db.run(`
