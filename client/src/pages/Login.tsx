@@ -26,9 +26,10 @@ export default function Login() {
   async function loadUsers() {
     try {
       const data = await userApi.list();
-      setUsers(data);
+      setUsers(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error('加载用户失败:', error);
+      setUsers([]);
     } finally {
       setLoading(false);
     }

@@ -101,31 +101,32 @@ function extractPartyB(fullText: string, lines: string[]): string | null {
 
 function extractContractAmount(fullText: string, lines: string[]): string | null {
   const patterns = [
-    /合同金额[：:(（\s]*([^\n\r，。；]+)/i,
-    /合同价款[：:(（\s]*([^\n\r，。；]+)/i,
-    /合同总价[：:(（\s]*([^\n\r，。；]+)/i,
-    /总金额[：:(（\s]*([^\n\r，。；]+)/i,
-    /价款[：:(（\s]*([^\n\r，。；]+)/i,
-    /租金[：:(（\s]*([^\n\r，。；]+)/i,
-    /人民币[：:(（\s]*([^\n\r，。；]+元)/i,
-    /(￥[0-9,]+\.?[0-9]*)/,
-    /([0-9,]+\.?[0-9]*\s*元)/
+    /合同金额[：:(（\s]*([^\n\r，。；]+?元(?:整)?)/i,
+    /合同价款[：:(（\s]*([^\n\r，。；]+?元(?:整)?)/i,
+    /合同总价[：:(（\s]*([^\n\r，。；]+?元(?:整)?)/i,
+    /总金额[：:(（\s]*([^\n\r，。；]+?元(?:整)?)/i,
+    /价款[：:(（\s]*([^\n\r，。；]+?元(?:整)?)/i,
+    /租金[：:(（\s]*([^\n\r，。；]+?元(?:整)?)/i,
+    /人民币[：:(（\s]*([^\n\r，。；]+?元(?:整)?)/i,
+    /(￥[0-9,]+\.?[0-9]*\s*(?:元|万元|万元整))/,
+    /([0-9,]+\.?[0-9]*\s*(?:元|万元|万元整))/
   ];
 
   for (const pattern of patterns) {
     const match = fullText.match(pattern);
     if (match && match[1]) {
-      const result = match[1].trim();
-      if (result.length > 0 && result.length < 100) {
+      let result = match[1].trim();
+      result = result.replace(/^[为是\s]+/, '').trim();
+      if (result.length > 0 && result.length < 100 && !/%/.test(result)) {
         return result;
       }
     }
   }
 
   for (const line of lines) {
-    if (line.includes('金额') || line.includes('价款') || line.includes('价格')) {
-      const numMatch = line.match(/(￥?[0-9,]+\.?[0-9]*\s*(?:元|万元|万元整)?)/);
-      if (numMatch) {
+    if ((line.includes('金额') || line.includes('价款') || line.includes('价格')) && !/违约金|比例/.test(line)) {
+      const numMatch = line.match(/(￥?[0-9,]+\.?[0-9]*\s*(?:元|万元|万元整))/);
+      if (numMatch && !/%/.test(numMatch[1])) {
         return numMatch[1].trim();
       }
     }
@@ -215,15 +216,39 @@ function extractPaymentMethod(fullText: string, lines: string[]): string | null 
   const patterns = [
     /付款方式[：:(（\s]*([^\n\r。；]+)/i,
     /支付方式[：:(（\s]*([^\n\r。；]+)/i,
-    /结算方式[：:(（\s]*([^\n\r。；]+)/i
+    /结算方式[：:(（\s]*([^\n\r。；]+)/i,
+    /付款条款[：:(（\s]*([^\n\r。；]+)/i
   ];
 
   for (const pattern of patterns) {
     const match = fullText.match(pattern);
     if (match && match[1]) {
       const result = match[1].trim().replace(/[。；]$/, '').trim();
-      if (result.length > 0 && result.length < 200) {
+      if (result.length > 0 && result.length < 200 && !/^[￥￥]?\d/.test(result)) {
         return result;
+      }
+    }
+  }
+
+  const paymentSentencePattern = /[^。；\n]*(?:合同签订后|验收合格后|质保期满后|\d+\s*个?工作日内)[^。；\n]*?(?:支付|付款)[^。；\n]*(?:预付款|进度款|余款|\d+%)[^。；\n]*/i;
+  const sentenceMatch = fullText.match(paymentSentencePattern);
+  if (sentenceMatch) {
+    let result = sentenceMatch[0].trim().replace(/^[，,。；\s]+/, '').replace(/[，,。；\s]+$/, '').trim();
+    result = result.replace(/^本合同总金额[^。]*?元[整]?[。，；,]\s*/, '').trim();
+    if (result.length > 0 && result.length < 200 && !/^[￥￥]?[0-9,]+\.?[0-9]*\s*元/.test(result) && !/^人民币[0-9]/.test(result)) {
+      return result;
+    }
+  }
+
+  for (const line of lines) {
+    if (/支付|付款|预付款|分期付款|进度款|结算/.test(line)) {
+      const paymentMatch = line.match(/[^。；\n]*(?:\d+\s*个?工作日内\s*支付|预付款|分期付款|支付\s*\d+%|付\s*\d+%|进度款|结算)[^。；\n]*/i);
+      if (paymentMatch) {
+        let result = paymentMatch[0].trim().replace(/^[，,。；\s]+/, '').replace(/[，,。；\s]+$/, '').trim();
+        result = result.replace(/^本合同总金额[^。]*?元[整]?[。，；,]\s*/, '').trim();
+        if (result.length > 0 && result.length < 200 && !/^[￥￥]?[0-9,]+\.?[0-9]*\s*元/.test(result) && !/^人民币[0-9]/.test(result)) {
+          return result;
+        }
       }
     }
   }
@@ -247,13 +272,30 @@ function extractPenaltyRatio(fullText: string, lines: string[]): string | null {
     /([0-9.]+%\s*[每／/]\s*日)/i,
     /(每日[0-9.]+%)/i,
     /(日[0-9.]+‰)/i,
-    /([0-9.]+‰\s*[每／/]\s*日)/i
+    /([0-9.]+‰\s*[每／/]\s*日)/i,
+    /([^。；\n]*?合同(?:总)?金额[0-9.]+%[^。；\n]*?违约金)/i,
+    /([^。；\n]*?[0-9.]+%[^。；\n]*?的违约金)/i,
+    /([^。；\n]*?支付[^。；\n]*?[0-9.]+%[^。；\n]*?违约金)/i,
+    /([^。；\n]*?每逾期[^。；\n]*?[0-9.]+%[^。；\n]*?违约金)/i,
+    /([^。；\n]*?万分之[零一二三四五六七八九十百千0-9.]+[^。；\n]*?违约金)/i,
+    /([^。；\n]*?千分之[零一二三四五六七八九十百千0-9.]+[^。；\n]*?违约金)/i,
+    /([^。；\n]*?百分之[零一二三四五六七八九十百千0-9.]+[^。；\n]*?违约金)/i
   ];
 
   for (const pattern of patterns) {
     const match = fullText.match(pattern);
     if (match && match[1]) {
-      const result = match[1].trim().replace(/[。；]$/, '').trim();
+      let result = match[1].trim().replace(/[。；]$/, '').trim();
+      result = result.replace(/^[，,。；\s]+/, '').trim();
+      if (result.length > 0 && result.length < 100) {
+        return result;
+      }
+    }
+  }
+
+  for (const line of lines) {
+    if (/违约金|滞纳金/.test(line) && /[0-9.]+%|千分之|百分之|万分之/.test(line)) {
+      const result = line.trim().replace(/^[，,。；\s]+/, '').replace(/[，,。；\s]+$/, '').trim();
       if (result.length > 0 && result.length < 100) {
         return result;
       }
@@ -276,7 +318,8 @@ function extractConfidentialityPeriod(fullText: string, lines: string[]): string
   for (const pattern of patterns) {
     const match = fullText.match(pattern);
     if (match && match[1]) {
-      const result = match[1].trim().replace(/[。；]$/, '').trim();
+      let result = match[1].trim().replace(/[。；]$/, '').trim();
+      result = result.replace(/^[为\s]+/, '').trim();
       if (result.length > 0 && result.length < 100) {
         return result;
       }
