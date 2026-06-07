@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { templateApi, contractApi } from '../services/api';
 import { getCurrentUser } from '../store/auth';
-import { Template } from '../types';
+import { Template, TemplateVersion } from '../types';
 
 const sampleContract = `1、合同双方
 甲方：某某科技有限公司，统一社会信用代码：911100001234567890。
@@ -44,6 +44,8 @@ export default function ContractUpload() {
   const navigate = useNavigate();
   const [templates, setTemplates] = useState<Template[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState('');
+  const [templateVersions, setTemplateVersions] = useState<TemplateVersion[]>([]);
+  const [selectedVersion, setSelectedVersion] = useState<number | undefined>(undefined);
   const [title, setTitle] = useState('');
   const [rawContent, setRawContent] = useState('');
   const [expiryDate, setExpiryDate] = useState('');
@@ -66,11 +68,30 @@ export default function ContractUpload() {
       setTemplates(data);
       if (data.length > 0) {
         setSelectedTemplate(data[0].id);
+        loadTemplateVersions(data[0].id);
       }
     } catch (error) {
       console.error('加载模板失败:', error);
     }
   }
+
+  async function loadTemplateVersions(templateId: string) {
+    try {
+      const versions = await templateApi.getVersions(templateId);
+      setTemplateVersions(versions);
+      setSelectedVersion(versions.length > 0 ? versions[0].versionNumber : undefined);
+    } catch (error) {
+      console.error('加载模板版本失败:', error);
+      setTemplateVersions([]);
+      setSelectedVersion(undefined);
+    }
+  }
+
+  const handleTemplateChange = (templateId: string) => {
+    setSelectedTemplate(templateId);
+    setPreviewDiffs(null);
+    loadTemplateVersions(templateId);
+  };
 
   async function loadParentContract() {
     if (!parentId) return;
@@ -82,6 +103,7 @@ export default function ContractUpload() {
       if (contract.expiryDate) {
         setExpiryDate(contract.expiryDate);
       }
+      loadTemplateVersions(contract.templateId);
     } catch (error) {
       console.error('加载原始合同失败:', error);
     }
@@ -94,7 +116,7 @@ export default function ContractUpload() {
     }
     setComparing(true);
     try {
-      const result = await contractApi.compare(selectedTemplate, rawContent);
+      const result = await templateApi.compare(selectedTemplate, rawContent, selectedVersion);
       setPreviewDiffs(result.diffs);
     } catch (error) {
       console.error('比对失败:', error);
@@ -184,13 +206,33 @@ export default function ContractUpload() {
             </label>
             <select
               value={selectedTemplate}
-              onChange={e => setSelectedTemplate(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+              onChange={e => handleTemplateChange(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all mb-3"
             >
               {templates.map(t => (
                 <option key={t.id} value={t.id}>{t.name}</option>
               ))}
             </select>
+
+            {templateVersions.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  选择版本 <span className="text-gray-400 font-normal">(默认使用最新版本)</span>
+                </label>
+                <select
+                  value={selectedVersion ?? ''}
+                  onChange={e => setSelectedVersion(e.target.value ? parseInt(e.target.value) : undefined)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+                >
+                  <option value="">最新版本</option>
+                  {templateVersions.map(v => (
+                    <option key={v.id} value={v.versionNumber}>
+                      v{v.versionNumber} - {v.createdByName} - {new Date(v.createdAt).toLocaleDateString('zh-CN')}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">

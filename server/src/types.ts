@@ -147,6 +147,43 @@ export interface Template {
   name: string;
   clauses: Clause[];
   createdAt: string;
+  latestVersion?: number;
+}
+
+export interface TemplateVersion {
+  id: string;
+  templateId: string;
+  versionNumber: number;
+  name: string;
+  clauses: Clause[];
+  description?: string;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface TemplateDraft {
+  id: string;
+  templateId: string;
+  name: string;
+  clauses: Clause[];
+  savedBy: string;
+  savedByName: string;
+  lastSavedAt: string;
+}
+
+export interface TemplateEditLock {
+  id: string;
+  templateId: string;
+  userId: string;
+  userName: string;
+  acquiredAt: string;
+  lastActivityAt: string;
+}
+
+export interface TemplateWithLock extends Template {
+  editLock?: TemplateEditLock | null;
+  hasDraft?: boolean;
 }
 
 export interface User {

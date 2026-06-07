@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Template, Contract, Comment, ApprovalNode, ApprovalNodeWithTimeout, CompareResult, User, WarningRule, WarningRecord, WarningStats, WarningLevel, WarningRecordStatus, ContractSummary, RiskScoreDetail, ApprovalTimeoutConfig, ApprovalEfficiencyStats, ApprovalRole } from '../types';
+import { Template, TemplateVersion, TemplateDraft, TemplateEditLock, TemplateWithLock, Contract, Comment, ApprovalNode, ApprovalNodeWithTimeout, CompareResult, TemplateVersionCompareResult, User, WarningRule, WarningRecord, WarningStats, WarningLevel, WarningRecordStatus, ContractSummary, RiskScoreDetail, ApprovalTimeoutConfig, ApprovalEfficiencyStats, ApprovalRole } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -8,9 +8,36 @@ const api = axios.create({
 
 export const templateApi = {
   list: () => api.get<Template[]>('/templates').then(r => r.data),
-  get: (id: string) => api.get<Template>(`/templates/${id}`).then(r => r.data),
-  create: (name: string, clauses: any[]) =>
-    api.post<Template>('/templates', { name, clauses }).then(r => r.data)
+  listWithLock: () => api.get<TemplateWithLock[]>('/templates?withLock=true').then(r => r.data),
+  get: (id: string) => api.get<Template & { latestVersion: number; editLock: TemplateEditLock | null; hasDraft: boolean }>(`/templates/${id}`).then(r => r.data),
+  create: (name: string, clauses: any[], createdBy: string, createdByName: string) =>
+    api.post<Template>('/templates', { name, clauses, createdBy, createdByName }).then(r => r.data),
+  getVersions: (templateId: string) =>
+    api.get<TemplateVersion[]>(`/templates/${templateId}/versions`).then(r => r.data),
+  getVersion: (templateId: string, versionNumber: number) =>
+    api.get<TemplateVersion>(`/templates/${templateId}/versions/${versionNumber}`).then(r => r.data),
+  compareVersions: (templateId: string, fromVersion: number, toVersion: number) =>
+    api.get<TemplateVersionCompareResult>(`/templates/${templateId}/versions/compare?from=${fromVersion}&to=${toVersion}`).then(r => r.data),
+  rollbackVersion: (templateId: string, versionNumber: number, createdBy: string, createdByName: string) =>
+    api.post<TemplateVersion>(`/templates/${templateId}/versions/${versionNumber}/rollback`, { createdBy, createdByName }).then(r => r.data),
+  publishVersion: (templateId: string, data: { name: string; clauses: any[]; description?: string; createdBy: string; createdByName: string }) =>
+    api.post<TemplateVersion>(`/templates/${templateId}/versions`, data).then(r => r.data),
+  getDraft: (templateId: string) =>
+    api.get<TemplateDraft | null>(`/templates/${templateId}/draft`).then(r => r.data),
+  saveDraft: (templateId: string, data: { name: string; clauses: any[]; savedBy: string; savedByName: string }) =>
+    api.put<TemplateDraft>(`/templates/${templateId}/draft`, data).then(r => r.data),
+  deleteDraft: (templateId: string) =>
+    api.delete(`/templates/${templateId}/draft`).then(r => r.data),
+  getLock: (templateId: string) =>
+    api.get<TemplateEditLock | null>(`/templates/${templateId}/lock`).then(r => r.data),
+  acquireLock: (templateId: string, userId: string, userName: string) =>
+    api.post<TemplateEditLock>(`/templates/${templateId}/lock`, { userId, userName }).then(r => r.data),
+  refreshLock: (templateId: string, userId: string) =>
+    api.put<{ success: boolean; lock: TemplateEditLock }>(`/templates/${templateId}/lock`, { userId }).then(r => r.data),
+  releaseLock: (templateId: string, userId: string) =>
+    api.delete<{ success: boolean }>(`/templates/${templateId}/lock`, { data: { userId } }).then(r => r.data),
+  compare: (templateId: string, rawContent: string, versionNumber?: number) =>
+    api.post<CompareResult>('/compare', { templateId, rawContent, versionNumber }).then(r => r.data)
 };
 
 const baseContractApi = {
@@ -25,8 +52,8 @@ const baseContractApi = {
     parentId?: string;
     expiryDate?: string;
   }) => api.post<Contract>('/contracts', data).then(r => r.data),
-  compare: (templateId: string, rawContent: string) =>
-    api.post<CompareResult>('/compare', { templateId, rawContent }).then(r => r.data),
+  compare: (templateId: string, rawContent: string, versionNumber?: number) =>
+    api.post<CompareResult>('/compare', { templateId, rawContent, versionNumber }).then(r => r.data),
   getCompare: (id: string) =>
     api.get<{ contract: Contract; template: Template; diffs: any[]; summary: ContractSummary; riskDetail: RiskScoreDetail }>(`/contracts/${id}/compare`).then(r => r.data),
   getVersions: (id: string) => api.get<Contract[]>(`/contracts/${id}/versions`).then(r => r.data),

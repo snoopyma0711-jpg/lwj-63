@@ -1,14 +1,18 @@
 import { Server as HTTPServer } from 'http';
 import { Server, Socket } from 'socket.io';
-import { Comment, Contract, ApprovalNode, WarningRecord, WarningStats, RiskScoreDetail, ApprovalEfficiencyStats } from './types';
+import { Comment, Contract, ApprovalNode, WarningRecord, WarningStats, RiskScoreDetail, ApprovalEfficiencyStats, TemplateEditLock } from './types';
 import { getApprovalEfficiencyStats } from './services/approvalEfficiencyService';
+import { releaseExpiredLocks, getTemplateEditLock } from './services/dbService';
 
 let io: Server;
 
 const contractRooms = new Map<string, Set<string>>();
+const templateRooms = new Map<string, Set<string>>();
 const warningRoom = 'warning:dashboard';
 const riskRankingRoom = 'risk:ranking';
 const efficiencyRoom = 'efficiency:dashboard';
+
+let lockCheckInterval: NodeJS.Timeout | null = null;
 
 let efficiencyStatsInterval: NodeJS.Timeout | null = null;
 
@@ -68,9 +72,27 @@ export function initWebSocket(server: HTTPServer): void {
       console.log(`Socket ${socket.id} left efficiency dashboard`);
     });
 
+    socket.on('join:template', (templateId: string) => {
+      socket.join(`template:${templateId}`);
+      if (!templateRooms.has(templateId)) {
+        templateRooms.set(templateId, new Set());
+      }
+      templateRooms.get(templateId)!.add(socket.id);
+      console.log(`Socket ${socket.id} joined template ${templateId}`);
+    });
+
+    socket.on('leave:template', (templateId: string) => {
+      socket.leave(`template:${templateId}`);
+      templateRooms.get(templateId)?.delete(socket.id);
+      console.log(`Socket ${socket.id} left template ${templateId}`);
+    });
+
     socket.on('disconnect', () => {
       console.log('Client disconnected:', socket.id);
       contractRooms.forEach((sockets) => {
+        sockets.delete(socket.id);
+      });
+      templateRooms.forEach((sockets) => {
         sockets.delete(socket.id);
       });
     });
@@ -150,5 +172,61 @@ export function stopEfficiencyStatsScheduler(): void {
   if (efficiencyStatsInterval) {
     clearInterval(efficiencyStatsInterval);
     efficiencyStatsInterval = null;
+  }
+}
+
+export function broadcastTemplateLockUpdate(
+  templateId: string,
+  data: {
+    lock: TemplateEditLock | null;
+    action: 'acquired' | 'released' | 'refreshed' | 'timeout';
+  }
+): void {
+  if (io) {
+    io.to(`template:${templateId}`).emit('template:lock-update', data);
+  }
+}
+
+export function broadcastTemplateVersionUpdate(
+  templateId: string,
+  data: {
+    versionNumber: number;
+    action: 'created' | 'rolled_back';
+  }
+): void {
+  if (io) {
+    io.to(`template:${templateId}`).emit('template:version-update', data);
+  }
+}
+
+export async function checkAndReleaseExpiredLocks(): Promise<void> {
+  try {
+    const expiredTemplateIds = await releaseExpiredLocks(5 * 60 * 1000);
+    for (const templateId of expiredTemplateIds) {
+      const lock = await getTemplateEditLock(templateId);
+      broadcastTemplateLockUpdate(templateId, {
+        lock: null,
+        action: 'timeout'
+      });
+      console.log(`自动释放模板 ${templateId} 的编辑锁（超时）`);
+    }
+  } catch (error) {
+    console.error('检查并释放过期锁失败:', error);
+  }
+}
+
+export function startTemplateLockScheduler(): void {
+  if (lockCheckInterval) {
+    clearInterval(lockCheckInterval);
+  }
+  lockCheckInterval = setInterval(() => {
+    checkAndReleaseExpiredLocks();
+  }, 30000);
+}
+
+export function stopTemplateLockScheduler(): void {
+  if (lockCheckInterval) {
+    clearInterval(lockCheckInterval);
+    lockCheckInterval = null;
   }
 }

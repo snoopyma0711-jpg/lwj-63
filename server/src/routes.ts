@@ -27,46 +27,331 @@ import {
   getPendingContractsByRiskScore,
   getApprovalTimeoutConfigs,
   getApprovalTimeoutConfig,
-  setApprovalTimeoutConfig
+  setApprovalTimeoutConfig,
+  getTemplatesWithLock,
+  getTemplateVersions,
+  getTemplateVersion,
+  getTemplateLatestVersion,
+  createTemplateVersion,
+  getTemplateDraft,
+  saveTemplateDraft,
+  deleteTemplateDraft,
+  getTemplateEditLock,
+  acquireTemplateEditLock,
+  refreshTemplateEditLock,
+  releaseTemplateEditLock,
+  updateTemplate
 } from './services/dbService';
 import { startApproval, processApproval, getApprovalChainStatus } from './services/approvalService';
 import { getApprovalEfficiencyStats } from './services/approvalEfficiencyService';
-import { broadcastComment, broadcastApprovalUpdate, broadcastStatusUpdate, broadcastWarningStatsUpdate, broadcastWarningRecordUpdate, broadcastRiskScoreUpdate, broadcastEfficiencyStats } from './websocket';
-import { RiskLevel, ApprovalRole, WarningLevel, WarningRecordStatus, ApprovalEfficiencyStats } from './types';
+import {
+  broadcastComment,
+  broadcastApprovalUpdate,
+  broadcastStatusUpdate,
+  broadcastWarningStatsUpdate,
+  broadcastWarningRecordUpdate,
+  broadcastRiskScoreUpdate,
+  broadcastEfficiencyStats,
+  broadcastTemplateLockUpdate,
+  broadcastTemplateVersionUpdate
+} from './websocket';
+import { RiskLevel, ApprovalRole, WarningLevel, WarningRecordStatus, ApprovalEfficiencyStats, Clause } from './types';
 import { extractContractSummary } from './services/summaryExtractionService';
 import { calculateRiskScore } from './services/riskScoringService';
 
 const router = Router();
 
 router.get('/templates', async (req: Request, res: Response) => {
-  const templates = await getTemplates();
+  const withLock = req.query.withLock === 'true';
+  const templates = withLock ? await getTemplatesWithLock() : await getTemplates();
   res.json(templates);
 });
 
 router.get('/templates/:id', async (req: Request, res: Response) => {
   const template = await getTemplate(req.params.id);
   if (!template) return res.status(404).json({ error: '模板不存在' });
-  res.json(template);
+
+  const latestVersion = await getTemplateLatestVersion(req.params.id);
+  const editLock = await getTemplateEditLock(req.params.id);
+  const draft = await getTemplateDraft(req.params.id);
+
+  res.json({
+    ...template,
+    latestVersion,
+    editLock,
+    hasDraft: !!draft
+  });
 });
 
 router.post('/templates', async (req: Request, res: Response) => {
-  const { name, clauses } = req.body;
+  const { name, clauses, createdBy, createdByName } = req.body;
   const template = await createTemplate(name, clauses);
+
+  await createTemplateVersion({
+    templateId: template.id,
+    versionNumber: 1,
+    name: template.name,
+    clauses: template.clauses,
+    description: '初始版本',
+    createdBy: createdBy || 'system',
+    createdByName: createdByName || '系统'
+  });
+
   res.json(template);
 });
 
-router.post('/compare', async (req: Request, res: Response) => {
-  const { templateId, rawContent } = req.body;
-  const template = await getTemplate(templateId);
-  if (!template) return res.status(404).json({ error: '模板不存在' });
+router.get('/templates/:id/versions', async (req: Request, res: Response) => {
+  const versions = await getTemplateVersions(req.params.id);
+  res.json(versions);
+});
 
-  const actualClauses = parseClauses(rawContent);
-  const diffs = compareClauses(template.clauses, actualClauses);
+router.get('/templates/:id/versions/:version', async (req: Request, res: Response) => {
+  const version = parseInt(req.params.version);
+  if (isNaN(version)) return res.status(400).json({ error: '无效的版本号' });
+
+  const templateVersion = await getTemplateVersion(req.params.id, version);
+  if (!templateVersion) return res.status(404).json({ error: '版本不存在' });
+
+  res.json(templateVersion);
+});
+
+router.get('/templates/:id/versions/compare', async (req: Request, res: Response) => {
+  const { from, to } = req.query;
+  if (!from || !to) return res.status(400).json({ error: '请指定两个版本号' });
+
+  const fromVersion = parseInt(from as string);
+  const toVersion = parseInt(to as string);
+
+  if (isNaN(fromVersion) || isNaN(toVersion)) {
+    return res.status(400).json({ error: '无效的版本号' });
+  }
+
+  const fromTemplate = await getTemplateVersion(req.params.id, fromVersion);
+  const toTemplate = await getTemplateVersion(req.params.id, toVersion);
+
+  if (!fromTemplate || !toTemplate) {
+    return res.status(404).json({ error: '指定的版本不存在' });
+  }
+
+  const diffs = compareClauses(fromTemplate.clauses, toTemplate.clauses);
 
   res.json({
-    templateClauses: template.clauses,
-    actualClauses,
+    fromVersion: fromTemplate,
+    toVersion: toTemplate,
     diffs
+  });
+});
+
+router.post('/templates/:id/versions/:version/rollback', async (req: Request, res: Response) => {
+  const version = parseInt(req.params.version);
+  if (isNaN(version)) return res.status(400).json({ error: '无效的版本号' });
+
+  const { createdBy, createdByName } = req.body;
+  if (!createdBy || !createdByName) {
+    return res.status(400).json({ error: '请提供创建者信息' });
+  }
+
+  const lock = await getTemplateEditLock(req.params.id);
+  if (lock && lock.userId !== createdBy) {
+    return res.status(409).json({ error: `当前${lock.userName}正在编辑该模板，请稍后再试` });
+  }
+
+  const targetVersion = await getTemplateVersion(req.params.id, version);
+  if (!targetVersion) return res.status(404).json({ error: '版本不存在' });
+
+  const latestVersion = await getTemplateLatestVersion(req.params.id);
+  const newVersionNumber = latestVersion + 1;
+
+  const newVersion = await createTemplateVersion({
+    templateId: req.params.id,
+    versionNumber: newVersionNumber,
+    name: targetVersion.name,
+    clauses: targetVersion.clauses,
+    description: `回滚到v${version}`,
+    createdBy,
+    createdByName
+  });
+
+  await updateTemplate(req.params.id, targetVersion.name, targetVersion.clauses);
+  await deleteTemplateDraft(req.params.id);
+
+  broadcastTemplateVersionUpdate(req.params.id, {
+    versionNumber: newVersionNumber,
+    action: 'rolled_back'
+  });
+
+  res.json(newVersion);
+});
+
+router.post('/templates/:id/versions', async (req: Request, res: Response) => {
+  const { name, clauses, description, createdBy, createdByName } = req.body;
+
+  if (!createdBy || !createdByName) {
+    return res.status(400).json({ error: '请提供创建者信息' });
+  }
+
+  const lock = await getTemplateEditLock(req.params.id);
+  if (!lock || lock.userId !== createdBy) {
+    return res.status(409).json({ error: '您没有编辑权限，请先获取编辑锁' });
+  }
+
+  const latestVersion = await getTemplateLatestVersion(req.params.id);
+  const newVersionNumber = latestVersion + 1;
+
+  const newVersion = await createTemplateVersion({
+    templateId: req.params.id,
+    versionNumber: newVersionNumber,
+    name: name,
+    clauses: clauses,
+    description: description || `版本v${newVersionNumber}`,
+    createdBy,
+    createdByName
+  });
+
+  await updateTemplate(req.params.id, name, clauses);
+  await deleteTemplateDraft(req.params.id);
+
+  broadcastTemplateVersionUpdate(req.params.id, {
+    versionNumber: newVersionNumber,
+    action: 'created'
+  });
+
+  res.json(newVersion);
+});
+
+router.get('/templates/:id/draft', async (req: Request, res: Response) => {
+  const draft = await getTemplateDraft(req.params.id);
+  res.json(draft);
+});
+
+router.put('/templates/:id/draft', async (req: Request, res: Response) => {
+  const { name, clauses, savedBy, savedByName } = req.body;
+
+  if (!savedBy || !savedByName) {
+    return res.status(400).json({ error: '请提供保存者信息' });
+  }
+
+  const lock = await getTemplateEditLock(req.params.id);
+  if (!lock || lock.userId !== savedBy) {
+    return res.status(409).json({ error: '您没有编辑权限，请先获取编辑锁' });
+  }
+
+  const draft = await saveTemplateDraft({
+    templateId: req.params.id,
+    name,
+    clauses,
+    savedBy,
+    savedByName
+  });
+
+  await refreshTemplateEditLock(req.params.id, savedBy);
+
+  res.json(draft);
+});
+
+router.delete('/templates/:id/draft', async (req: Request, res: Response) => {
+  await deleteTemplateDraft(req.params.id);
+  res.json({ success: true });
+});
+
+router.get('/templates/:id/lock', async (req: Request, res: Response) => {
+  const lock = await getTemplateEditLock(req.params.id);
+  res.json(lock);
+});
+
+router.post('/templates/:id/lock', async (req: Request, res: Response) => {
+  const { userId, userName } = req.body;
+
+  if (!userId || !userName) {
+    return res.status(400).json({ error: '请提供用户信息' });
+  }
+
+  const lock = await acquireTemplateEditLock(req.params.id, userId, userName);
+
+  if (!lock) {
+    const currentLock = await getTemplateEditLock(req.params.id);
+    return res.status(409).json({
+      error: `当前${currentLock?.userName}正在编辑该模板，请稍后再试`,
+      lock: currentLock
+    });
+  }
+
+  broadcastTemplateLockUpdate(req.params.id, {
+    lock,
+    action: 'acquired'
+  });
+
+  res.json(lock);
+});
+
+router.put('/templates/:id/lock', async (req: Request, res: Response) => {
+  const { userId } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ error: '请提供用户ID' });
+  }
+
+  const success = await refreshTemplateEditLock(req.params.id, userId);
+
+  if (!success) {
+    return res.status(409).json({ error: '您没有持有该模板的编辑锁' });
+  }
+
+  const lock = await getTemplateEditLock(req.params.id);
+  broadcastTemplateLockUpdate(req.params.id, {
+    lock,
+    action: 'refreshed'
+  });
+
+  res.json({ success: true, lock });
+});
+
+router.delete('/templates/:id/lock', async (req: Request, res: Response) => {
+  const { userId } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ error: '请提供用户ID' });
+  }
+
+  const success = await releaseTemplateEditLock(req.params.id, userId);
+
+  if (!success) {
+    return res.status(409).json({ error: '您没有持有该模板的编辑锁' });
+  }
+
+  broadcastTemplateLockUpdate(req.params.id, {
+    lock: null,
+    action: 'released'
+  });
+
+  res.json({ success: true });
+});
+
+router.post('/compare', async (req: Request, res: Response) => {
+  const { templateId, rawContent, versionNumber } = req.body;
+  let template = await getTemplate(templateId);
+  if (!template) return res.status(404).json({ error: '模板不存在' });
+
+  let templateClauses = template.clauses;
+  let selectedVersion = versionNumber;
+
+  if (versionNumber) {
+    const templateVersion = await getTemplateVersion(templateId, parseInt(versionNumber));
+    if (templateVersion) {
+      templateClauses = templateVersion.clauses;
+    } else {
+      selectedVersion = undefined;
+    }
+  }
+
+  const actualClauses = parseClauses(rawContent);
+  const diffs = compareClauses(templateClauses, actualClauses);
+
+  res.json({
+    templateClauses,
+    actualClauses,
+    diffs,
+    selectedVersion
   });
 });
 

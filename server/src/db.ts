@@ -126,6 +126,41 @@ export async function getDb() {
         role TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS template_versions (
+        id TEXT PRIMARY KEY,
+        template_id TEXT NOT NULL,
+        version_number INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        clauses TEXT NOT NULL,
+        description TEXT,
+        created_by TEXT NOT NULL,
+        created_by_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE,
+        UNIQUE(template_id, version_number)
+      );
+
+      CREATE TABLE IF NOT EXISTS template_drafts (
+        id TEXT PRIMARY KEY,
+        template_id TEXT NOT NULL UNIQUE,
+        clauses TEXT NOT NULL,
+        name TEXT NOT NULL,
+        saved_by TEXT NOT NULL,
+        saved_by_name TEXT NOT NULL,
+        last_saved_at TEXT NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS template_edit_locks (
+        id TEXT PRIMARY KEY,
+        template_id TEXT NOT NULL UNIQUE,
+        user_id TEXT NOT NULL,
+        user_name TEXT NOT NULL,
+        acquired_at TEXT NOT NULL,
+        last_activity_at TEXT NOT NULL,
+        FOREIGN KEY (template_id) REFERENCES templates(id) ON DELETE CASCADE
+      );
+
       CREATE INDEX IF NOT EXISTS idx_contracts_parent ON contracts(parent_id);
       CREATE INDEX IF NOT EXISTS idx_contracts_status ON contracts(status);
       CREATE INDEX IF NOT EXISTS idx_contracts_expiry ON contracts(expiry_date);
@@ -137,6 +172,11 @@ export async function getDb() {
       CREATE INDEX IF NOT EXISTS idx_warning_records_level ON warning_records(warning_level);
       CREATE INDEX IF NOT EXISTS idx_contracts_risk_score ON contracts(risk_score);
       CREATE INDEX IF NOT EXISTS idx_contract_summaries_contract ON contract_summaries(contract_id);
+      CREATE INDEX IF NOT EXISTS idx_template_versions_template ON template_versions(template_id);
+      CREATE INDEX IF NOT EXISTS idx_template_versions_number ON template_versions(template_id, version_number);
+      CREATE INDEX IF NOT EXISTS idx_template_drafts_template ON template_drafts(template_id);
+      CREATE INDEX IF NOT EXISTS idx_template_locks_template ON template_edit_locks(template_id);
+      CREATE INDEX IF NOT EXISTS idx_template_locks_activity ON template_edit_locks(last_activity_at);
     `);
   }
   return db;

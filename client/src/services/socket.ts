@@ -1,5 +1,5 @@
 import { io, Socket } from 'socket.io-client';
-import { Comment, Contract, ApprovalNode, WarningRecord, WarningStats, RiskScoreDetail, ApprovalEfficiencyStats } from '../types';
+import { Comment, Contract, ApprovalNode, WarningRecord, WarningStats, RiskScoreDetail, ApprovalEfficiencyStats, TemplateEditLock } from '../types';
 
 let socket: Socket | null = null;
 
@@ -161,5 +161,49 @@ export function onEfficiencyUpdate(callback: (stats: ApprovalEfficiencyStats) =>
 export function offEfficiencyUpdate(callback: (stats: ApprovalEfficiencyStats) => void): void {
   if (socket) {
     socket.off('efficiency:update', callback);
+  }
+}
+
+export function joinTemplate(templateId: string): void {
+  if (socket) {
+    socket.emit('join:template', templateId);
+  }
+}
+
+export function leaveTemplate(templateId: string): void {
+  if (socket) {
+    socket.emit('leave:template', templateId);
+  }
+}
+
+export function onTemplateLockUpdate(
+  callback: (data: { lock: TemplateEditLock | null; action: 'acquired' | 'released' | 'refreshed' | 'timeout' }) => void
+): void {
+  if (socket) {
+    socket.on('template:lock-update', callback);
+  }
+}
+
+export function offTemplateLockUpdate(
+  callback: (data: { lock: TemplateEditLock | null; action: 'acquired' | 'released' | 'refreshed' | 'timeout' }) => void
+): void {
+  if (socket) {
+    socket.off('template:lock-update', callback);
+  }
+}
+
+export function onTemplateVersionUpdate(
+  callback: (data: { versionNumber: number; action: 'created' | 'rolled_back' }) => void
+): void {
+  if (socket) {
+    socket.on('template:version-update', callback);
+  }
+}
+
+export function offTemplateVersionUpdate(
+  callback: (data: { versionNumber: number; action: 'created' | 'rolled_back' }) => void
+): void {
+  if (socket) {
+    socket.off('template:version-update', callback);
   }
 }

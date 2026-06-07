@@ -1,10 +1,31 @@
 import { getDb } from './db';
-import { createTemplate, createUser, getUser, createContract, updateContractStatus, createApprovalNode, updateApprovalNodeArrivedAt, updateApprovalNode } from './services/dbService';
+import { createTemplate, createUser, getUser, createContract, updateContractStatus, createApprovalNode, updateApprovalNodeArrivedAt, updateApprovalNode, createTemplateVersion, getTemplates } from './services/dbService';
 import { startApproval } from './services/approvalService';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function seedData(): Promise<void> {
   const db = await getDb();
+  
+  const existingTemplates = await getTemplates();
+  if (existingTemplates.length > 0) {
+    const versionCheck = await db.get('SELECT COUNT(*) as count FROM template_versions') as any;
+    if (versionCheck.count === 0) {
+      console.log('为已有模板补全初始版本...');
+      for (const template of existingTemplates) {
+        await createTemplateVersion({
+          templateId: template.id,
+          versionNumber: 1,
+          name: template.name,
+          clauses: template.clauses,
+          description: '初始版本',
+          createdBy: 'system',
+          createdByName: '系统'
+        });
+      }
+      console.log('初始版本补全完成');
+    }
+  }
+  
   const userCheck = await db.get('SELECT COUNT(*) as count FROM users') as any;
   if (userCheck.count > 0) {
     console.log('数据已存在，跳过初始化');
@@ -69,6 +90,16 @@ export async function seedData(): Promise<void> {
   ];
 
   const serviceTemplate = await createTemplate('标准服务合同模板', templateClauses);
+  await createTemplateVersion({
+    templateId: serviceTemplate.id,
+    versionNumber: 1,
+    name: serviceTemplate.name,
+    clauses: serviceTemplate.clauses,
+    description: '初始版本',
+    createdBy: 'system',
+    createdByName: '系统'
+  });
+
   const purchaseTemplate = await createTemplate('标准采购合同模板', [
     {
       id: uuidv4(),
@@ -89,6 +120,15 @@ export async function seedData(): Promise<void> {
       content: '乙方应在[日期]前将货物送至甲方指定地点。'
     }
   ]);
+  await createTemplateVersion({
+    templateId: purchaseTemplate.id,
+    versionNumber: 1,
+    name: purchaseTemplate.name,
+    clauses: purchaseTemplate.clauses,
+    description: '初始版本',
+    createdBy: 'system',
+    createdByName: '系统'
+  });
 
   function addDays(days: number): string {
     const date = new Date();

@@ -8,6 +8,9 @@ import ContractDetail from './pages/ContractDetail';
 import WarningDashboard from './pages/WarningDashboard';
 import RiskRanking from './pages/RiskRanking';
 import ApprovalEfficiency from './pages/ApprovalEfficiency';
+import TemplateList from './pages/TemplateList';
+import TemplateEditor from './pages/TemplateEditor';
+import TemplateVersions from './pages/TemplateVersions';
 import { getCurrentUser, onUserChange } from './store/auth';
 import { User } from './types';
 
@@ -32,6 +35,9 @@ function App() {
         <Route path="/risk-ranking" element={<RiskRanking />} />
         <Route path="/warnings" element={<WarningDashboard />} />
         <Route path="/efficiency" element={<ApprovalEfficiency />} />
+        <Route path="/templates" element={<TemplateList />} />
+        <Route path="/templates/:id/edit" element={<TemplateEditor />} />
+        <Route path="/templates/:id/versions" element={<TemplateVersions />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

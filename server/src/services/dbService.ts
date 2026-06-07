@@ -1,5 +1,5 @@
 import { getDb } from '../db';
-import { Contract, Template, Comment, ApprovalNode, User, ApprovalRole, ApprovalStatus, WarningRule, WarningRecord, WarningLevel, WarningRecordStatus, ContractSummary, ApprovalTimeoutConfig } from '../types';
+import { Contract, Template, Comment, ApprovalNode, User, ApprovalRole, ApprovalStatus, WarningRule, WarningRecord, WarningLevel, WarningRecordStatus, ContractSummary, ApprovalTimeoutConfig, TemplateVersion, TemplateDraft, TemplateEditLock, TemplateWithLock } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function getTemplates(): Promise<Template[]> {
@@ -704,4 +704,289 @@ export async function getPendingApprovalNodesWithContracts(): Promise<Array<Appr
     riskScore: r.risk_score,
     submittedAt: r.submitted_at
   }));
+}
+
+export async function getTemplatesWithLock(): Promise<TemplateWithLock[]> {
+  const db = await getDb();
+  const rows = await db.all(`
+    SELECT t.*, 
+      l.id as lock_id, l.user_id as lock_user_id, l.user_name as lock_user_name, 
+      l.acquired_at as lock_acquired_at, l.last_activity_at as lock_last_activity_at,
+      v.max_version as latest_version,
+      CASE WHEN d.id IS NOT NULL THEN 1 ELSE 0 END as has_draft
+    FROM templates t
+    LEFT JOIN template_edit_locks l ON t.id = l.template_id
+    LEFT JOIN (
+      SELECT template_id, MAX(version_number) as max_version 
+      FROM template_versions 
+      GROUP BY template_id
+    ) v ON t.id = v.template_id
+    LEFT JOIN template_drafts d ON t.id = d.template_id
+    ORDER BY t.created_at DESC
+  `);
+  
+  return rows.map((r: any) => ({
+    id: r.id,
+    name: r.name,
+    clauses: JSON.parse(r.clauses),
+    createdAt: r.created_at,
+    latestVersion: r.latest_version || 0,
+    hasDraft: r.has_draft === 1,
+    editLock: r.lock_id ? {
+      id: r.lock_id,
+      templateId: r.id,
+      userId: r.lock_user_id,
+      userName: r.lock_user_name,
+      acquiredAt: r.lock_acquired_at,
+      lastActivityAt: r.lock_last_activity_at
+    } : null
+  }));
+}
+
+export async function getTemplateLatestVersion(templateId: string): Promise<number> {
+  const db = await getDb();
+  const row = await db.get(`
+    SELECT MAX(version_number) as max_version 
+    FROM template_versions 
+    WHERE template_id = ?
+  `, templateId);
+  return row?.max_version || 0;
+}
+
+export async function getTemplateVersions(templateId: string): Promise<TemplateVersion[]> {
+  const db = await getDb();
+  const rows = await db.all(`
+    SELECT * FROM template_versions 
+    WHERE template_id = ? 
+    ORDER BY version_number DESC
+  `, templateId);
+  
+  return rows.map((r: any) => ({
+    id: r.id,
+    templateId: r.template_id,
+    versionNumber: r.version_number,
+    name: r.name,
+    clauses: JSON.parse(r.clauses),
+    description: r.description || undefined,
+    createdBy: r.created_by,
+    createdByName: r.created_by_name,
+    createdAt: r.created_at
+  }));
+}
+
+export async function getTemplateVersion(templateId: string, versionNumber: number): Promise<TemplateVersion | null> {
+  const db = await getDb();
+  const row = await db.get(`
+    SELECT * FROM template_versions 
+    WHERE template_id = ? AND version_number = ?
+  `, templateId, versionNumber);
+  
+  if (!row) return null;
+  
+  return {
+    id: row.id,
+    templateId: row.template_id,
+    versionNumber: row.version_number,
+    name: row.name,
+    clauses: JSON.parse(row.clauses),
+    description: row.description || undefined,
+    createdBy: row.created_by,
+    createdByName: row.created_by_name,
+    createdAt: row.created_at
+  };
+}
+
+export async function createTemplateVersion(data: {
+  templateId: string;
+  versionNumber: number;
+  name: string;
+  clauses: any[];
+  description?: string;
+  createdBy: string;
+  createdByName: string;
+}): Promise<TemplateVersion> {
+  const id = uuidv4();
+  const now = new Date().toISOString();
+  const db = await getDb();
+  
+  await db.run(`
+    INSERT INTO template_versions (
+      id, template_id, version_number, name, clauses, description,
+      created_by, created_by_name, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, id, data.templateId, data.versionNumber, data.name, 
+     JSON.stringify(data.clauses), data.description || null,
+     data.createdBy, data.createdByName, now);
+  
+  return getTemplateVersion(data.templateId, data.versionNumber) as Promise<TemplateVersion>;
+}
+
+export async function getTemplateDraft(templateId: string): Promise<TemplateDraft | null> {
+  const db = await getDb();
+  const row = await db.get(`
+    SELECT * FROM template_drafts 
+    WHERE template_id = ?
+  `, templateId);
+  
+  if (!row) return null;
+  
+  return {
+    id: row.id,
+    templateId: row.template_id,
+    name: row.name,
+    clauses: JSON.parse(row.clauses),
+    savedBy: row.saved_by,
+    savedByName: row.saved_by_name,
+    lastSavedAt: row.last_saved_at
+  };
+}
+
+export async function saveTemplateDraft(data: {
+  templateId: string;
+  name: string;
+  clauses: any[];
+  savedBy: string;
+  savedByName: string;
+}): Promise<TemplateDraft> {
+  const db = await getDb();
+  const existing = await getTemplateDraft(data.templateId);
+  const now = new Date().toISOString();
+  
+  if (existing) {
+    await db.run(`
+      UPDATE template_drafts 
+      SET name = ?, clauses = ?, saved_by = ?, saved_by_name = ?, last_saved_at = ?
+      WHERE template_id = ?
+    `, data.name, JSON.stringify(data.clauses), data.savedBy, data.savedByName, now, data.templateId);
+  } else {
+    const id = uuidv4();
+    await db.run(`
+      INSERT INTO template_drafts (
+        id, template_id, name, clauses, saved_by, saved_by_name, last_saved_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, id, data.templateId, data.name, JSON.stringify(data.clauses), 
+       data.savedBy, data.savedByName, now);
+  }
+  
+  return getTemplateDraft(data.templateId) as Promise<TemplateDraft>;
+}
+
+export async function deleteTemplateDraft(templateId: string): Promise<void> {
+  const db = await getDb();
+  await db.run('DELETE FROM template_drafts WHERE template_id = ?', templateId);
+}
+
+export async function getTemplateEditLock(templateId: string): Promise<TemplateEditLock | null> {
+  const db = await getDb();
+  const row = await db.get(`
+    SELECT * FROM template_edit_locks 
+    WHERE template_id = ?
+  `, templateId);
+  
+  if (!row) return null;
+  
+  return {
+    id: row.id,
+    templateId: row.template_id,
+    userId: row.user_id,
+    userName: row.user_name,
+    acquiredAt: row.acquired_at,
+    lastActivityAt: row.last_activity_at
+  };
+}
+
+export async function acquireTemplateEditLock(
+  templateId: string,
+  userId: string,
+  userName: string
+): Promise<TemplateEditLock | null> {
+  const db = await getDb();
+  const existing = await getTemplateEditLock(templateId);
+  
+  if (existing && existing.userId !== userId) {
+    return null;
+  }
+  
+  const now = new Date().toISOString();
+  
+  if (existing) {
+    await db.run(`
+      UPDATE template_edit_locks 
+      SET last_activity_at = ?
+      WHERE template_id = ?
+    `, now, templateId);
+  } else {
+    const id = uuidv4();
+    await db.run(`
+      INSERT INTO template_edit_locks (
+        id, template_id, user_id, user_name, acquired_at, last_activity_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `, id, templateId, userId, userName, now, now);
+  }
+  
+  return getTemplateEditLock(templateId);
+}
+
+export async function refreshTemplateEditLock(templateId: string, userId: string): Promise<boolean> {
+  const db = await getDb();
+  const lock = await getTemplateEditLock(templateId);
+  
+  if (!lock || lock.userId !== userId) {
+    return false;
+  }
+  
+  const now = new Date().toISOString();
+  await db.run(`
+    UPDATE template_edit_locks 
+    SET last_activity_at = ?
+    WHERE template_id = ? AND user_id = ?
+  `, now, templateId, userId);
+  
+  return true;
+}
+
+export async function releaseTemplateEditLock(templateId: string, userId: string): Promise<boolean> {
+  const db = await getDb();
+  const lock = await getTemplateEditLock(templateId);
+  
+  if (!lock || lock.userId !== userId) {
+    return false;
+  }
+  
+  await db.run('DELETE FROM template_edit_locks WHERE template_id = ? AND user_id = ?', templateId, userId);
+  return true;
+}
+
+export async function releaseExpiredLocks(timeoutMs: number = 5 * 60 * 1000): Promise<string[]> {
+  const db = await getDb();
+  const now = new Date();
+  const cutoffTime = new Date(now.getTime() - timeoutMs).toISOString();
+  
+  const expiredLocks = await db.all(`
+    SELECT template_id, user_id, user_name 
+    FROM template_edit_locks 
+    WHERE last_activity_at < ?
+  `, cutoffTime);
+  
+  if (expiredLocks.length > 0) {
+    await db.run(`
+      DELETE FROM template_edit_locks 
+      WHERE last_activity_at < ?
+    `, cutoffTime);
+  }
+  
+  return expiredLocks.map((l: any) => l.template_id);
+}
+
+export async function updateTemplate(templateId: string, name: string, clauses: any[]): Promise<Template | null> {
+  const now = new Date().toISOString();
+  const db = await getDb();
+  
+  await db.run(`
+    UPDATE templates 
+    SET name = ?, clauses = ?
+    WHERE id = ?
+  `, name, JSON.stringify(clauses), templateId);
+  
+  return getTemplate(templateId);
 }

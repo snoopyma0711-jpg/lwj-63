@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import http from 'http';
 import routes from './routes';
-import { initWebSocket, startEfficiencyStatsScheduler } from './websocket';
+import { initWebSocket, startEfficiencyStatsScheduler, startTemplateLockScheduler } from './websocket';
 import { seedData } from './seed';
 import { initDefaultWarningRules, initDefaultApprovalTimeoutConfigs } from './services/dbService';
 import { startWarningScanScheduler } from './services/warningScanService';
@@ -28,6 +28,7 @@ async function start() {
   await initDefaultApprovalTimeoutConfigs();
   startWarningScanScheduler();
   startEfficiencyStatsScheduler();
+  startTemplateLockScheduler();
   server.listen(PORT, () => {
     console.log(`服务器运行在 http://localhost:${PORT}`);
     console.log(`WebSocket 已启动`);
