@@ -105,16 +105,6 @@ router.get('/templates/:id/versions', async (req: Request, res: Response) => {
   res.json(versions);
 });
 
-router.get('/templates/:id/versions/:version', async (req: Request, res: Response) => {
-  const version = parseInt(req.params.version);
-  if (isNaN(version)) return res.status(400).json({ error: '无效的版本号' });
-
-  const templateVersion = await getTemplateVersion(req.params.id, version);
-  if (!templateVersion) return res.status(404).json({ error: '版本不存在' });
-
-  res.json(templateVersion);
-});
-
 router.get('/templates/:id/versions/compare', async (req: Request, res: Response) => {
   const { from, to } = req.query;
   if (!from || !to) return res.status(400).json({ error: '请指定两个版本号' });
@@ -181,6 +171,16 @@ router.post('/templates/:id/versions/:version/rollback', async (req: Request, re
   });
 
   res.json(newVersion);
+});
+
+router.get('/templates/:id/versions/:version', async (req: Request, res: Response) => {
+  const version = parseInt(req.params.version);
+  if (isNaN(version)) return res.status(400).json({ error: '无效的版本号' });
+
+  const templateVersion = await getTemplateVersion(req.params.id, version);
+  if (!templateVersion) return res.status(404).json({ error: '版本不存在' });
+
+  res.json(templateVersion);
 });
 
 router.post('/templates/:id/versions', async (req: Request, res: Response) => {

@@ -188,6 +188,7 @@ export interface TemplateEditLock {
 }
 
 export interface TemplateWithLock extends Template {
+  latestVersion?: number;
   editLock?: TemplateEditLock | null;
   hasDraft?: boolean;
 }

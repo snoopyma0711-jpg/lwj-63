@@ -5,12 +5,18 @@ import { initSocket, joinTemplate, leaveTemplate, onTemplateLockUpdate, offTempl
 import { Clause, Template, TemplateEditLock, TemplateDraft } from '../types';
 import { getCurrentUser } from '../store/auth';
 
+type TemplateDetail = Template & {
+  latestVersion: number;
+  editLock: TemplateEditLock | null;
+  hasDraft: boolean;
+};
+
 export default function TemplateEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const user = getCurrentUser();
 
-  const [template, setTemplate] = useState<Template | null>(null);
+  const [template, setTemplate] = useState<TemplateDetail | null>(null);
   const [clauses, setClauses] = useState<Clause[]>([]);
   const [templateName, setTemplateName] = useState('');
   const [selectedClauseId, setSelectedClauseId] = useState<string | null>(null);
@@ -29,8 +35,16 @@ export default function TemplateEditor() {
   const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lockRefreshTimerRef = useRef<NodeJS.Timeout | null>(null);
   const hasChangedRef = useRef(false);
+  const isUnmountedRef = useRef(false);
 
-  initSocket();
+  useEffect(() => {
+    initSocket();
+    isUnmountedRef.current = false;
+
+    return () => {
+      isUnmountedRef.current = true;
+    };
+  }, []);
 
   const handleLockUpdate = useCallback((data: { lock: TemplateEditLock | null; action: string }) => {
     setEditLock(data.lock);
@@ -85,14 +99,31 @@ export default function TemplateEditor() {
       if (lockRefreshTimerRef.current) {
         clearInterval(lockRefreshTimerRef.current);
       }
-      if (hasLock && id && user && hasUnsavedChanges) {
-        saveDraft();
-        releaseLock();
-      } else if (hasLock && id && user) {
-        releaseLock();
-      }
     };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (hasLock && id && user) {
+        const cleanup = async () => {
+          try {
+            if (hasUnsavedChanges) {
+              await templateApi.saveDraft(id, {
+                name: templateName,
+                clauses,
+                savedBy: user.id,
+                savedByName: user.name
+              });
+            }
+            await templateApi.releaseLock(id, user.id);
+          } catch (e) {
+            console.error('Cleanup failed:', e);
+          }
+        };
+        cleanup();
+      }
+    };
+  }, [hasLock, id, user, hasUnsavedChanges, templateName, clauses]);
 
   useEffect(() => {
     if (hasLock && id && user) {
@@ -206,12 +237,15 @@ export default function TemplateEditor() {
 
     try {
       setSaving(true);
-      await templateApi.saveDraft(id, {
-        name: templateName,
-        clauses,
-        savedBy: user.id,
-        savedByName: user.name
-      });
+      await Promise.all([
+        templateApi.saveDraft(id, {
+          name: templateName,
+          clauses,
+          savedBy: user.id,
+          savedByName: user.name
+        }),
+        templateApi.refreshLock(id, user.id)
+      ]);
       setLastSavedAt(new Date());
       hasChangedRef.current = false;
       setHasUnsavedChanges(false);
