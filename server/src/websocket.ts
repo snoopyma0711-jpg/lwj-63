@@ -1,6 +1,6 @@
 import { Server as HTTPServer } from 'http';
 import { Server, Socket } from 'socket.io';
-import { Comment, Contract, ApprovalNode, WarningRecord, WarningStats, RiskScoreDetail, ApprovalEfficiencyStats, TemplateEditLock } from './types';
+import { Comment, Contract, ApprovalNode, WarningRecord, WarningStats, RiskScoreDetail, ApprovalEfficiencyStats, TemplateEditLock, ClauseChangeWarning } from './types';
 import { getApprovalEfficiencyStats } from './services/approvalEfficiencyService';
 import { releaseExpiredLocks, getTemplateEditLock } from './services/dbService';
 
@@ -11,6 +11,7 @@ const templateRooms = new Map<string, Set<string>>();
 const warningRoom = 'warning:dashboard';
 const riskRankingRoom = 'risk:ranking';
 const efficiencyRoom = 'efficiency:dashboard';
+const clauseWarningRoom = 'clause:warning';
 
 let lockCheckInterval: NodeJS.Timeout | null = null;
 
@@ -85,6 +86,16 @@ export function initWebSocket(server: HTTPServer): void {
       socket.leave(`template:${templateId}`);
       templateRooms.get(templateId)?.delete(socket.id);
       console.log(`Socket ${socket.id} left template ${templateId}`);
+    });
+
+    socket.on('join:clause-warning', () => {
+      socket.join(clauseWarningRoom);
+      console.log(`Socket ${socket.id} joined clause warning`);
+    });
+
+    socket.on('leave:clause-warning', () => {
+      socket.leave(clauseWarningRoom);
+      console.log(`Socket ${socket.id} left clause warning`);
     });
 
     socket.on('disconnect', () => {
@@ -228,5 +239,11 @@ export function stopTemplateLockScheduler(): void {
   if (lockCheckInterval) {
     clearInterval(lockCheckInterval);
     lockCheckInterval = null;
+  }
+}
+
+export function broadcastClauseWarningUpdate(warning: ClauseChangeWarning): void {
+  if (io) {
+    io.to(clauseWarningRoom).emit('clause:warning', warning);
   }
 }

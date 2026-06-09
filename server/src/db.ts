@@ -177,6 +177,38 @@ export async function getDb() {
       CREATE INDEX IF NOT EXISTS idx_template_drafts_template ON template_drafts(template_id);
       CREATE INDEX IF NOT EXISTS idx_template_locks_template ON template_edit_locks(template_id);
       CREATE INDEX IF NOT EXISTS idx_template_locks_activity ON template_edit_locks(last_activity_at);
+
+      CREATE TABLE IF NOT EXISTS clause_relations (
+        id TEXT PRIMARY KEY,
+        clause_number_a TEXT NOT NULL,
+        clause_number_b TEXT NOT NULL,
+        relation_type TEXT NOT NULL,
+        description TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        created_by_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(clause_number_a, clause_number_b)
+      );
+
+      CREATE TABLE IF NOT EXISTS clause_change_warnings (
+        id TEXT PRIMARY KEY,
+        contract_id TEXT NOT NULL,
+        contract_title TEXT NOT NULL,
+        changed_clause_number TEXT NOT NULL,
+        changed_clause_title TEXT,
+        affected_clause_numbers TEXT NOT NULL,
+        relation_type TEXT NOT NULL,
+        changed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_clause_relations_a ON clause_relations(clause_number_a);
+      CREATE INDEX IF NOT EXISTS idx_clause_relations_b ON clause_relations(clause_number_b);
+      CREATE INDEX IF NOT EXISTS idx_clause_relations_type ON clause_relations(relation_type);
+      CREATE INDEX IF NOT EXISTS idx_clause_warnings_contract ON clause_change_warnings(contract_id);
+      CREATE INDEX IF NOT EXISTS idx_clause_warnings_created ON clause_change_warnings(created_at);
+      CREATE INDEX IF NOT EXISTS idx_clause_warnings_status ON clause_change_warnings(status);
     `);
   }
   return db;

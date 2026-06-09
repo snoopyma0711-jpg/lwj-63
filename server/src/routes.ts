@@ -53,11 +53,21 @@ import {
   broadcastRiskScoreUpdate,
   broadcastEfficiencyStats,
   broadcastTemplateLockUpdate,
-  broadcastTemplateVersionUpdate
+  broadcastTemplateVersionUpdate,
+  broadcastClauseWarningUpdate
 } from './websocket';
-import { RiskLevel, ApprovalRole, WarningLevel, WarningRecordStatus, ApprovalEfficiencyStats, Clause } from './types';
+import { RiskLevel, ApprovalRole, WarningLevel, WarningRecordStatus, ApprovalEfficiencyStats, Clause, ClauseRelationType, ClauseChangeWarningFilters } from './types';
 import { extractContractSummary } from './services/summaryExtractionService';
 import { calculateRiskScore } from './services/riskScoringService';
+import {
+  createClauseRelation,
+  getClauseRelations,
+  deleteClauseRelation,
+  getImpactAnalysis,
+  getClauseChangeWarnings,
+  updateClauseChangeWarningStatus,
+  handleClauseChange
+} from './services/clauseGraphService';
 
 const router = Router();
 
@@ -729,6 +739,139 @@ router.put('/approval-timeout-configs/:role', async (req: Request, res: Response
 router.get('/approval-efficiency', async (req: Request, res: Response) => {
   const stats = await getApprovalEfficiencyStats();
   res.json(stats);
+});
+
+router.get('/clause-relations', async (req: Request, res: Response) => {
+  const { clauseNumber, keyword, relationType } = req.query;
+  const filters: {
+    clauseNumber?: string;
+    keyword?: string;
+    relationType?: ClauseRelationType;
+  } = {};
+  if (clauseNumber) filters.clauseNumber = clauseNumber as string;
+  if (keyword) filters.keyword = keyword as string;
+  if (relationType) filters.relationType = relationType as ClauseRelationType;
+
+  const relations = await getClauseRelations(filters);
+  res.json(relations);
+});
+
+router.post('/clause-relations', async (req: Request, res: Response) => {
+  const { clauseNumberA, clauseNumberB, relationType, description, createdBy, createdByName } = req.body;
+
+  if (!clauseNumberA || !clauseNumberB || !relationType || !description || !createdBy || !createdByName) {
+    return res.status(400).json({ error: '缺少必要参数' });
+  }
+
+  const validTypes: ClauseRelationType[] = ['引用', '冲突', '补充', '替代'];
+  if (!validTypes.includes(relationType)) {
+    return res.status(400).json({ error: '无效的关系类型，必须是：引用、冲突、补充、替代' });
+  }
+
+  const result = await createClauseRelation({
+    clauseNumberA,
+    clauseNumberB,
+    relationType: relationType as ClauseRelationType,
+    description,
+    createdBy,
+    createdByName
+  });
+
+  if ('error' in result) {
+    return res.status(409).json({ error: result.error });
+  }
+
+  res.json(result);
+});
+
+router.delete('/clause-relations/:id', async (req: Request, res: Response) => {
+  const success = await deleteClauseRelation(req.params.id);
+  if (!success) {
+    return res.status(404).json({ error: '关联关系不存在' });
+  }
+  res.json({ success: true });
+});
+
+router.get('/clause-relations/impact-analysis', async (req: Request, res: Response) => {
+  const { clauseNumber, templateId } = req.query;
+  if (!clauseNumber) {
+    return res.status(400).json({ error: '请提供条款编号' });
+  }
+
+  const result = await getImpactAnalysis(
+    clauseNumber as string,
+    templateId ? templateId as string : undefined
+  );
+  res.json(result);
+});
+
+router.get('/clause-change-warnings', async (req: Request, res: Response) => {
+  const { contractId, startTime, endTime, status } = req.query;
+  const filters: ClauseChangeWarningFilters = {};
+  if (contractId) filters.contractId = contractId as string;
+  if (startTime) filters.startTime = startTime as string;
+  if (endTime) filters.endTime = endTime as string;
+  if (status) filters.status = status as 'pending' | 'viewed' | 'handled';
+
+  const warnings = await getClauseChangeWarnings(filters);
+  res.json(warnings);
+});
+
+router.put('/clause-change-warnings/:id/status', async (req: Request, res: Response) => {
+  const { status } = req.body;
+  if (!['pending', 'viewed', 'handled'].includes(status)) {
+    return res.status(400).json({ error: '无效的状态' });
+  }
+
+  const success = await updateClauseChangeWarningStatus(
+    req.params.id,
+    status as 'pending' | 'viewed' | 'handled'
+  );
+
+  if (!success) {
+    return res.status(404).json({ error: '预警记录不存在' });
+  }
+
+  res.json({ success: true });
+});
+
+router.post('/contracts/:id/new-version', async (req: Request, res: Response) => {
+  const parentContract = await getContract(req.params.id);
+  if (!parentContract) {
+    return res.status(404).json({ error: '原合同不存在' });
+  }
+
+  const { rawContent, submittedBy, submittedByName } = req.body;
+  if (!rawContent || !submittedBy || !submittedByName) {
+    return res.status(400).json({ error: '缺少必要参数' });
+  }
+
+  const newContract = await createContract({
+    title: parentContract.title,
+    templateId: parentContract.templateId,
+    rawContent,
+    submittedBy,
+    submittedByName,
+    parentId: parentContract.id,
+    expiryDate: parentContract.expiryDate
+  });
+
+  const parentClauses = parseClauses(parentContract.rawContent);
+  const newClauses = parseClauses(rawContent);
+  const diffs = compareClauses(parentClauses, newClauses);
+
+  const changedClauseNumbers = diffs
+    .filter((d: any) => d.hasDiff)
+    .map((d: any) => d.clauseNumber);
+
+  if (changedClauseNumbers.length > 0) {
+    const warnings = await handleClauseChange(newContract.id, changedClauseNumbers, newContract.createdAt);
+    for (const warning of warnings) {
+      broadcastClauseWarningUpdate(warning);
+    }
+  }
+
+  res.json(newContract);
 });
 
 export default router;

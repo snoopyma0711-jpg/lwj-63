@@ -236,3 +236,52 @@ export interface ApprovalEfficiencyStats {
   };
   lastUpdated: string;
 }
+
+export type ClauseRelationType = '引用' | '冲突' | '补充' | '替代';
+
+export interface ClauseRelation {
+  id: string;
+  clauseNumberA: string;
+  clauseNumberB: string;
+  relationType: ClauseRelationType;
+  description: string;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+}
+
+export interface ClauseRelationWithClauseInfo extends ClauseRelation {
+  clauseTitleA?: string;
+  clauseTitleB?: string;
+}
+
+export interface ImpactAnalysisResult {
+  clauseNumber: string;
+  clauseTitle?: string;
+  directRelations: {
+    [key in ClauseRelationType]?: ClauseRelationWithClauseInfo[];
+  };
+  indirectRelations: {
+    [key in ClauseRelationType]?: ClauseRelationWithClauseInfo[];
+  };
+}
+
+export interface ClauseChangeWarning {
+  id: string;
+  contractId: string;
+  contractTitle: string;
+  changedClauseNumber: string;
+  changedClauseTitle?: string;
+  affectedClauseNumbers: string[];
+  relationType: ClauseRelationType;
+  changedAt: string;
+  createdAt: string;
+  status: 'pending' | 'viewed' | 'handled';
+}
+
+export interface ClauseChangeWarningFilters {
+  contractId?: string;
+  startTime?: string;
+  endTime?: string;
+  status?: 'pending' | 'viewed' | 'handled';
+}
